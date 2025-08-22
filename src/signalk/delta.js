@@ -117,6 +117,17 @@ class DeltaStat {
 }
 
 class DeltaSubscribe extends DeltaBase {
+  constructor(path) {
+    super(path);
+    this.lastUpdateTime = null;
+    this.freqAvg = null; // moving average frequency in Hz
+    this.freqAlpha = 0.2; // smoothing factor for moving average
+  }
+
+  get frequency() {
+    return this.freqAvg;
+  }
+
   subscribe(app, pluginId, unsubscribes, onChange = null, policy = "instant") {
     if (this.path?.trim?.().length) {
       app.debug(`subscribing to ${this.path}`);
@@ -136,6 +147,19 @@ class DeltaSubscribe extends DeltaBase {
             //app.debug(this.pluginId);
             if (u.source?.label !== pluginId) {
               u.values.forEach(v => {
+                // --- Frequency tracking ---
+                const now = Date.now();
+                if (this.lastUpdateTime) {
+                  const dt = (now - this.lastUpdateTime) ; 
+                  const freq = dt > 0 ? 1000 / dt : 0;
+                  if (this.freqAvg === null) {
+                    this.freqAvg = freq;
+                  } else {
+                    this.freqAvg = (1 - this.freqAlpha) * this.freqAvg + this.freqAlpha * freq;
+                  }
+                }
+                this.lastUpdateTime = now;
+                // --- End frequency tracking ---
                 this.value = v.value;
                 this.smoothen();
                 if (typeof onChange === 'function')
@@ -153,6 +177,7 @@ class DeltaSubscribe extends DeltaBase {
 }
 
 class PolarDeltaBase {
+
 
   static sendDeltas(app, pluginId, polars) {
     let values = [];
@@ -338,6 +363,13 @@ class PolarStat {
 
 class PolarDeltaSubscribe extends PolarDeltaBase {
 
+  constructor(speedPath, anglePath) {
+    super(speedPath, anglePath);
+    this.lastUpdateTime = null;
+    this.freqAvg = null; // moving average frequency in Hz
+    this.freqAlpha = 0.2; // smoothing factor for moving average
+  }
+
   subscribe(app, pluginId, unsubscribes, onChange = null, policy = "instant") {
     app.debug(`subscribing to ${this.path.speed} and ${this.path.angle}`);
     let localSubscription = {
@@ -365,6 +397,19 @@ class PolarDeltaSubscribe extends PolarDeltaBase {
                 this.renewed.angle = true;
               }
               if (this.renewed.speed && this.renewed.angle) {
+                // --- Frequency tracking ---
+                const now = Date.now();
+                if (this.lastUpdateTime) {
+                  const dt = (now - this.lastUpdateTime) ;
+                  const freq = dt > 0 ? 1000 / dt : 0;
+                  if (this.freqAvg === null) {
+                    this.freqAvg = freq;
+                  } else {
+                    this.freqAvg = (1 - this.freqAlpha) * this.freqAvg + this.freqAlpha * freq;
+                  }
+                }
+                this.lastUpdateTime = now;
+                // --- End frequency tracking ---
                 this.renewed.speed = false;
                 this.renewed.angle = false;
                 this.pToV();
@@ -379,9 +424,25 @@ class PolarDeltaSubscribe extends PolarDeltaBase {
       }
     )
   }
+
+  get frequency() {
+    return this.freqAvg;
+  }
 }
 
 class PolarDeltaCatch extends PolarDeltaBase {
+
+  constructor(speedPath, anglePath) {
+    super(speedPath, anglePath);
+    this.lastUpdateTime = null;
+    this.freqAvg = null; // moving average frequency in Hz
+    this.freqAlpha = 0.2; // smoothing factor for moving average
+  }
+
+  get frequency() {
+    return this.freqAvg;
+  }
+
   catchDeltas(app, pluginId, onChange) {
     app.debug(`Catching ${this.path}`);
     app.registerDeltaInputHandler((delta, next) => {
@@ -407,6 +468,19 @@ class PolarDeltaCatch extends PolarDeltaBase {
         }
       })
       if (this.renewed.speed && this.renewed.angle) {
+        // --- Frequency tracking ---
+        const now = Date.now();
+        if (this.lastUpdateTime) {
+          const dt = (now - this.lastUpdateTime) ;
+          const freq = dt > 0 ? 1000 / dt : 0;
+          if (this.freqAvg === null) {
+            this.freqAvg = freq;
+          } else {
+            this.freqAvg = (1 - this.freqAlpha) * this.freqAvg + this.freqAlpha * freq;
+          }
+        }
+        this.lastUpdateTime = now;
+        // --- End frequency tracking ---
         this.renewed.speed = false;
         this.renewed.angle = false;
         this.pToV();
