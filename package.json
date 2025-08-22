@@ -1,6 +1,6 @@
 {
   "name": "signalkutilities",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "utilities for signalK plugins",
   "main": "index.js",
   "scripts": {

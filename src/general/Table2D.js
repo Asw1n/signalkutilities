@@ -6,8 +6,7 @@ class Table2D {
     this.n = [0, 0]; // Initialize the n array
     this.ClassType = ClassType;
     this.parameters = param;
-    this.label = "table2D";
-    this.id = "table2D";
+    this.displayAttributes = {};
     for (let i = 0; i < 2; i++) {
       this.n[i] = Math.round((this.max[i] - this.min[i]) / this.step[i] + 1);
     }
@@ -17,11 +16,9 @@ class Table2D {
     );
   }
 
-  setDisplayAttributes(id, label) {
-    this.id = id;
-    this.label = label;
+  setDisplayAttributes(atrr) {
+    this.displayAttributes = atrr;
   }
-
   getCell(rowValue, colValue) {
     // console.log("getCell");
     // console.log(rowValue, colValue);
