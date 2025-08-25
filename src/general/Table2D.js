@@ -1,5 +1,6 @@
 class Table2D {
-  constructor(row = { min: 0, max: 10, step: 1 }, col = { min: 0, max: 10, step: 1 }, ClassType, param) {
+  constructor(id, row = { min: 0, max: 10, step: 1 }, col = { min: 0, max: 10, step: 1 }, ClassType, param) {
+    this.id = id;
     this.min = [row.min, col.min];
     this.max = [row.max, col.max];
     this.step = [row.step, col.step];
@@ -20,20 +21,17 @@ class Table2D {
     this.displayAttributes = atrr;
   }
   getCell(rowValue, colValue) {
-    // console.log("getCell");
-    // console.log(rowValue, colValue);
-    // console.log(this.getIndex(rowValue, 0), this.getIndex(colValue, 1));
-    // console.log(this.table[0][0]);
-    // console.log(this.table[this.getIndex(rowValue, 0), this.getIndex(colValue, 1)]);
-    return this.table[this.getIndex(rowValue, 0)][this.getIndex(colValue, 1)]; 
+   return this.table[this.getIndex(rowValue, 0)][this.getIndex(colValue, 1)]; 
   }
 
   toJSON() {
     return {
+      id: this.id,
       row: { min: this.min[0], max: this.max[0], step: this.step[0] },
       col: { min: this.min[1], max: this.max[1], step: this.step[1] },
       parameters: this.parameters,
-      table: this.table.map(row => row.map(cell => cell.toJSON()))
+      table: this.table.map(row => row.map(cell => cell.toJSON())),
+      displayAttributes: this.displayAttributes
     };
   }
 

@@ -28,21 +28,27 @@ class Polar {
   }
 
 
-  constructor(pathMagnitude, pathAngle, sourceMagnitude, sourceAngle) {
-
+  constructor(id,pathMagnitude, pathAngle, sourceMagnitude, sourceAngle) {
+    this.id = id;
     this.pathMagnitude = pathMagnitude;
     this.pathAngle = pathAngle;
     this.sourceMagnitude = sourceMagnitude;
     this.sourceAngle = sourceAngle;
-    this.magnitudeHandler = new MessageHandler(this.pathMagnitude, this.sourceMagnitude); 
-    this.angleHandler = new MessageHandler(this.pathAngle, this.sourceAngle);
-    this.onUpdate = null;
+    this.magnitudeHandler = new MessageHandler(this.id + "Magnitude", this.pathMagnitude, this.sourceMagnitude);
+    this.angleHandler = new MessageHandler(this.id + "Angle", this.pathAngle, this.sourceAngle);
+    this.onChange = null;
     // initialise to unit vector
     this.magnitudeHandler.value = 1;
     this.angleHandler.value = 0;
     this.xValue = 1;
     this.yValue = 0;
     this.displayAttributes = {};
+  this.angleRange = '-piToPi';
+  }
+  setAngleRange(range) {
+    if (range === '0to2pi' || range === '-piToPi') {
+      this.angleRange = range;
+    }
   }
 
 
@@ -60,8 +66,8 @@ class Polar {
   processChanges() {
     this.xValue = this.magnitudeHandler.value * Math.cos(this.angleHandler.value);
     this.yValue = this.magnitudeHandler.value * Math.sin(this.angleHandler.value);
-    if (typeof this.onUpdate === 'function') {
-      this.onUpdate();
+    if (typeof this.onChange === 'function') {
+      this.onChange();
     }
   }
 
@@ -109,8 +115,9 @@ class Polar {
 
   get polarValue() {
     return {
-      magnitude : Math.sqrt(this.xValue * this.xValue + this.yValue * this.yValue), 
-      angle: Math.atan2(this.yValue, this.xValue)};
+      magnitude : Math.sqrt(this.xValue * this.xValue + this.yValue * this.yValue),
+      angle: this._formatAngle(Math.atan2(this.yValue, this.xValue))
+    };
   }
   
   get vectorValue() {
@@ -134,12 +141,20 @@ class Polar {
   }
   
   get angle() {
-    return Math.atan2(this.yValue, this.xValue);
+    return this._formatAngle(Math.atan2(this.yValue, this.xValue));
+  }
+
+  _formatAngle(angle) {
+    if (this.angleRange === '0to2pi') {
+      return (angle < 0) ? angle + 2 * Math.PI : angle;
+    }
+    // default: -pi to pi
+    return angle;
   }
   
   get frequency() {
-    const f1 = this.magnitudeHandler.frequency;
-    const f2 = this.angleHandler.frequency;
+    const f1 = this.magnitudeHandler.subscribed ? this.magnitudeHandler.frequency : null;
+    const f2 = this.angleHandler.subscribed ? this.angleHandler.frequency : null;
     if (typeof f1 === 'number' && typeof f2 === 'number') {
       return Math.min(f1, f2);
     }
@@ -149,8 +164,8 @@ class Polar {
   }
   
   get timestamp() {
-    const f1 = this.magnitudeHandler.timestamp;
-    const f2 = this.angleHandler.timestamp;
+    const f1 = this.magnitudeHandler.subscribed ? this.magnitudeHandler.timestamp : null;
+    const f2 = this.angleHandler.subscribed ? this.angleHandler.timestamp : null;
     if (typeof f1 === 'number' && typeof f2 === 'number') {
       return Math.max(f1, f2);
     }
@@ -158,19 +173,68 @@ class Polar {
     if (typeof f2 === 'number') return f2;
     return null;
   }
+
+  lackingInputData() {
+    return this.magnitudeHandler.lackingInputData() || this.angleHandler.lackingInputData();
+  }
+
+  report() {
+    return {
+      id: this.id,
+      x: this.x,
+      y: this.y,
+      magnitude: this.magnitude,
+      angle: this.angle,
+      displayAttributes: this.displayAttributes,
+    };
+  } 
+
 }
 
 class PolarDamped {
-  constructor(polar, timeConstant = 5.0) {   // τ in seconds
+  constructor(id, polar, timeConstant = 1.0) {   // τ in seconds
+    this.id = id;
     this.polar = polar;
     this.timeConstant = timeConstant;
-
     this.xValue = 0;
     this.yValue = 0;
     this.xVar = 0;  // variance in x
     this.yVar = 0;  // variance in y
     this.timestamp = null;
-    this.n =0;
+    this.n = 0;
+    this.displayAttributes = {};
+    this.angleRange = '-piToPi';
+  }
+
+  setAngleRange(range) {
+    if (range === '0to2pi' || range === '-piToPi') {
+      this.angleRange = range;
+    }
+  }
+
+  static send(app, pluginId, polarsDamped) {
+    let values = [];
+    polarsDamped.forEach(pd => {
+      values.push({
+        path: pd.polar.pathMagnitude,
+        value: pd.magnitude
+      });
+      values.push({
+        path: pd.polar.pathAngle,
+        value: pd.angle
+      });
+    });
+    const message = {
+      context: 'vessels.self',
+      updates: [
+        {
+          source: {
+            label: pluginId
+          },
+          values: values
+        }]
+    };
+    app.handleMessage(pluginId, message);
   }
 
   sample() {
@@ -207,7 +271,24 @@ class PolarDamped {
   get polarValue() {
     return {
       magnitude: Math.sqrt(this.xValue * this.xValue + this.yValue * this.yValue),
-      angle: Math.atan2(this.yValue, this.xValue)
+      angle: this._formatAngle(Math.atan2(this.yValue, this.xValue))
+    };
+  }
+
+  setDisplayAttributes(attr) {
+    this.displayAttributes = attr;
+  }
+
+  report() {
+    return {
+      id: this.id,
+      x: this.x,
+      y: this.y,
+      magnitude: this.magnitude,
+      angle: this.angle,
+      displayAttributes: this.displayAttributes,
+      xVariance: this.xVar,
+      yVariance: this.yVar
     };
   }
 
@@ -216,8 +297,18 @@ class PolarDamped {
   get x() { return this.xValue; }
   get y() { return this.yValue; }
   get magnitude() { return Math.sqrt(this.xValue * this.xValue + this.yValue * this.yValue); }
-  get angle() { return Math.atan2(this.yValue, this.xValue); }
+  get angle() { return this._formatAngle(Math.atan2(this.yValue, this.xValue)); }
+
+  _formatAngle(angle) {
+    if (this.angleRange === '0to2pi') {
+      return (angle < 0) ? angle + 2 * Math.PI : angle;
+    }
+    // default: -pi to pi
+    return angle;
+  }
   get variance() { return [ this.xVar, this.yVar ]; }
+
+
 }
 
 

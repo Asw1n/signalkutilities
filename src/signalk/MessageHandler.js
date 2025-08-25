@@ -21,24 +21,29 @@ class MessageHandler {
     app.handleMessage(pluginId, message);
   }
 
-  constructor(path, source) {
-    this.path = path;
-    this.source = source;
-    this.value = null;
-    this.timestamp = null;
-    this.frequency = null; 
-    this.freqAlpha = 0.2; 
-    this.onChange = null;
+  constructor(id, path, source) {
+  this.id = id;
+  this.path = path;
+  this.source = typeof source === 'string' ? source.replace(/\s+/g, "") : source;
+  this.value = null;
+  this.timestamp = null;
+  this.frequency = null;
+  this.freqAlpha = 0.2;
+  this.onChange = null;
     this.displayAttributes = {};
+    this.subscribed = false
   }
 
   subscribe(app, pluginId, passOn = true) {
- 
-    app.debug(`Subscribing to  ${this.path}` + (this.source != null ? ` from source ${this.source}` : "") );
+    let label = null, talker = null;
+    if (typeof this.source === 'string' && this.source.includes('.')) {
+      [label, talker] = this.source.split('.', 2);
+    } 
+    app.debug(`Subscribing to ${this.path}` + (this.source ? ` from source ${this.source}` : "") );
     app.registerDeltaInputHandler((delta, next) => {
       let found = false;
       delta?.updates.forEach(update => {
-        if (update?.source?.label != pluginId  && (!this.source || update?.source?.label == this.source)) {
+        if (update?.source?.label != pluginId  && (!this.source || (update?.source?.label == label && update?.source?.talker == talker))) {
           if (Array.isArray(update?.values)) {
             update?.values.forEach(pathValue => {
               if (this.path == pathValue.path) {
@@ -59,6 +64,7 @@ class MessageHandler {
         next(delta);
       }
     });
+    this.subscribed = true
   }
 
     updateFrequency() { 
@@ -79,6 +85,21 @@ class MessageHandler {
     this.displayAttributes = attr;
   } 
 
+  lackingInputData() {
+    if (!this.subscribed) return false;
+    if (this.timestamp === null) return true;
+    return false;
+  }
+
+  report() {
+    return {
+      id:this.id,
+      value: this.value,
+      path: this.path,
+      source: this.source,
+      displayAttributes: this.displayAttributes
+    }
+  }
 }
 
 module.exports = MessageHandler;
