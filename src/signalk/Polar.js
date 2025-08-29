@@ -52,15 +52,21 @@ class Polar {
   }
 
 
-  subscribe(app, pluginId, magnitude = true, angle = true, passOn = true) {
+  subscribe(app, pluginId, magnitude = true, angle = true, passOn = true, onIdle = null) {
     if (magnitude) {
       this.magnitudeHandler.onChange = this.processChanges.bind(this);
-      this.magnitudeHandler.subscribe(app, pluginId, passOn);
+      this.magnitudeHandler.subscribe(app, pluginId, passOn, onIdle);
     }
     if (angle) {
       this.angleHandler.onChange = this.processChanges.bind(this);
-      this.angleHandler.subscribe(app, pluginId, passOn);
+      this.angleHandler.subscribe(app, pluginId, passOn, onIdle);
     }
+  }
+
+  terminate(app) {
+    this.magnitudeHandler.terminate(app);
+    this.angleHandler.terminate(app); 
+    return null;
   }
 
   processChanges() {

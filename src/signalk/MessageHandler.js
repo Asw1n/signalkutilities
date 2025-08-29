@@ -114,6 +114,19 @@ class MessageHandlerDamped {
   }
 }
 class MessageHandler {
+  terminate(app) {
+    this.onChange = null;
+    this.onIdle = null;
+    if (this._idleTimer) {
+      clearTimeout(this._idleTimer);
+      this._idleTimer = null;
+    }
+    if (this.subscribed) {
+      //app.registerDeltaInputHandler(null);
+    }
+    this.subscribed = false;
+    return null;
+  }
 
   static send(app, pluginId, messages) {
     let values = [];
@@ -147,14 +160,20 @@ class MessageHandler {
     this.onChange = null;
     this.displayAttributes = {};
     this.subscribed = false;
+    this.n = 0;
+    this.onIdle = null;
+    this.idlePeriod = 10000; // ms
+    this._idleTimer = null;
   }
 
-  subscribe(app, pluginId, passOn = true) {
+  subscribe(app, pluginId, passOn = true, onIdle = null) {
+    this.onIdle = onIdle;
     let label = null, talker = null;
     if (typeof this.source === 'string' && this.source.includes('.')) {
       [label, talker] = this.source.split('.', 2);
     }
     app.debug(`Subscribing to ${this.path}` + (this.source ? ` from source ${this.source}` : ""));
+    this._resetIdleTimer(app);
     app.registerDeltaInputHandler((delta, next) => {
       let found = false;
       delta?.updates.forEach(update => {
@@ -166,12 +185,13 @@ class MessageHandler {
                 this.updateFrequency();
                 found = true;
               }
-            }
-            )
+            });
           }
         }
-      })
-
+      });
+      if (found) {
+        this._resetIdleTimer(app);
+      }
       if (found && typeof this.onChange === 'function') {
         this.onChange();
       }
@@ -179,7 +199,20 @@ class MessageHandler {
         next(delta);
       }
     });
-    this.subscribed = true
+    this.subscribed = true;
+    return this;
+  }
+
+  _resetIdleTimer(app) {
+    if (this._idleTimer) {
+      clearTimeout(this._idleTimer);
+    }
+    this._idleTimer = setTimeout(() => {
+      app.debug(`No data for ${this.path}`);
+      if (typeof this.onIdle === 'function') {
+        this.onIdle(this);
+      }
+    }, this.idlePeriod);
   }
 
   updateFrequency() {
@@ -198,6 +231,7 @@ class MessageHandler {
 
   setDisplayAttributes(attr) {
     this.displayAttributes = attr;
+    return this;
   }
 
   lackingInputData() {
