@@ -179,25 +179,24 @@ class MessageHandler {
       delta?.updates.forEach(update => {
         if (update?.source?.label != pluginId && (!this.source || (update?.source?.label == label && update?.source?.talker == talker))) {
           if (Array.isArray(update?.values)) {
-            update?.values.forEach(pathValue => {
-              if (this.path == pathValue.path) {
-                this.value = pathValue.value;
+            for (let i = update.values.length - 1; i >= 0; i--) {
+              if (this.path == update.values[i].path) {
+                this.value = update.values[i].value;
                 this.updateFrequency();
                 found = true;
+                if (!passOn) update.values.splice(i, 1); 
               }
-            });
+            }
           }
         }
       });
       if (found) {
         this._resetIdleTimer(app);
+        if (typeof this.onChange === 'function') {
+          this.onChange();
+        }
       }
-      if (found && typeof this.onChange === 'function') {
-        this.onChange();
-      }
-      if ((found && passOn) || !found) {
-        next(delta);
-      }
+      next(delta);
     });
     this.subscribed = true;
     return this;
