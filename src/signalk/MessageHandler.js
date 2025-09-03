@@ -9,7 +9,7 @@ class MessageHandlerDamped {
     this.variance = undefined; // can be number or object
     this.timestamp = null;
     this.n = 0;
-    this.displayAttributes = {};
+    this._displayAttributes = {};
   }
 
   sample() {
@@ -95,8 +95,16 @@ class MessageHandlerDamped {
     this.n++;
   }
 
+  get stale() {
+    return this.handler.stale;
+  }
+
   setDisplayAttributes(attr) {
-    this.displayAttributes = attr;
+    this._displayAttributes = attr;
+  }
+
+  get displayAttributes() {
+    return { ...this._displayAttributes, stale: this.stale };
   }
 
   report() {
@@ -158,12 +166,13 @@ class MessageHandler {
     this.frequency = null;
     this.freqAlpha = 0.2;
     this.onChange = null;
-    this.displayAttributes = {};
+    this._displayAttributes = {};
     this.subscribed = false;
     this.n = 0;
     this.onIdle = null;
-    this.idlePeriod = 10000; // ms
+    this.idlePeriod = 4000; // ms
     this._idleTimer = null;
+    this.stale = false;
   }
 
   subscribe(app, pluginId, passOn = true, onIdle = null) {
@@ -205,9 +214,11 @@ class MessageHandler {
   _resetIdleTimer(app) {
     if (this._idleTimer) {
       clearTimeout(this._idleTimer);
+      this.stale = false;
     }
     this._idleTimer = setTimeout(() => {
       app.debug(`No data for ${this.path}`);
+      this.stale = true;
       if (typeof this.onIdle === 'function') {
         this.onIdle(this);
       }
@@ -229,15 +240,20 @@ class MessageHandler {
   }
 
   setDisplayAttributes(attr) {
-    this.displayAttributes = attr;
+    this._displayAttributes = attr;
     return this;
   }
 
+  /**
+   * @deprecated Use the 'stale' property instead.
+   */
   lackingInputData() {
-    if (!this.subscribed) return false;
-    if (this.timestamp === null) return true;
-    return false;
+    return this.stale;
   }
+
+  get displayAttributes() {
+    return { ...this._displayAttributes, stale: this.stale };
+  } 
 
   report() {
     return {

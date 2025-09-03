@@ -42,7 +42,7 @@ class Polar {
     this.angleHandler.value = 0;
     this.xValue = 1;
     this.yValue = 0;
-    this.displayAttributes = {};
+    this._displayAttributes = {};
     this.angleRange = '-piToPi';
   }
   setAngleRange(range) {
@@ -116,7 +116,7 @@ class Polar {
   }
 
   setDisplayAttributes(attr) {
-    this.displayAttributes = attr;
+    this._displayAttributes = attr;
   }
 
   set x(value) {
@@ -125,6 +125,10 @@ class Polar {
 
   set y(value) {
     this.yValue = value;
+  }
+
+  get displayAttributes() {
+    return { ...this._displayAttributes, stale: this.stale };
   }
 
   get polarValue() {
@@ -188,8 +192,15 @@ class Polar {
     return null;
   }
 
+  /**
+   * @deprecated Use the 'stale' property instead.
+   */
   lackingInputData() {
-    return this.magnitudeHandler.lackingInputData() || this.angleHandler.lackingInputData();
+    return this.stale;
+  }
+
+  get stale() {
+    return this.magnitudeHandler.stale || this.angleHandler.stale;
   }
 
   report() {
@@ -216,7 +227,7 @@ class PolarDamped {
     this.yVar = 0;  // variance in y
     this.timestamp = null;
     this.n = 0;
-    this.displayAttributes = {};
+    this._displayAttributes = {};
     this.angleRange = '-piToPi';
   }
 
@@ -307,7 +318,15 @@ class PolarDamped {
   }
 
   setDisplayAttributes(attr) {
-    this.displayAttributes = attr;
+    this._displayAttributes = attr;
+  }
+
+  get displayAttributes() {
+    return { ...this._displayAttributes, stale: this.stale };
+  }
+
+  get stale() {
+    return this.polar.stale;
   }
 
   report() {
