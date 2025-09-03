@@ -181,6 +181,11 @@ class MessageHandler {
     if (typeof this.source === 'string' && this.source.includes('.')) {
       [label, talker] = this.source.split('.', 2);
     }
+    if (!this.path || this.path === "") {
+      app.debug(`${this.id} is trying to subscribe to an empty path, subscription aborted`);
+      this.stale = true;
+      return;
+    }
     app.debug(`Subscribing to ${this.path}` + (this.source ? ` from source ${this.source}` : ""));
     this._resetIdleTimer(app);
     app.registerDeltaInputHandler((delta, next) => {
