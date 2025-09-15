@@ -1,4 +1,5 @@
 const { MessageHandler, MessageHandlerDamped } = require('./MessageHandler');
+const { MovingAverageSmoother, ExponentialSmoother, KalmanSmoother } = require('./smoothers');
 
 
 class Polar {
@@ -215,7 +216,9 @@ class Polar {
   }
 
 }
-
+/**
+ * @deprecated Use PolarSmoother instead.
+ */
 class PolarDamped {
   constructor(id, polar, timeConstant = 1.0) {   // τ in seconds
     this.id = id;
@@ -362,4 +365,250 @@ class PolarDamped {
 }
 
 
-module.exports = { Polar, PolarDamped };
+
+/**
+ * PolarSmoother applies statistical smoothing to the cartesian (x, y) representation
+ * of a Polar object using a specified Smoother class.
+ *
+ * The smoothing is applied to the x and y values (not magnitude/angle).
+ * The class assumes the underlying handlers always provide numeric values.
+ */
+class PolarSmoother {
+  /**
+   * @param {string} id - Identifier for this PolarSmoother.
+   * @param {Polar} polar - The Polar instance to wrap.
+   * @param {Function} SmootherClass - The smoother class to use (default: ExponentialSmoother).
+   * @param {Object} [smootherOptions={}] - Options for the smoother.
+   */
+  constructor(id, polar, SmootherClass = ExponentialSmoother, smootherOptions = {}) {
+    this.id = id;
+    this.polar = polar;
+    this.SmootherClass = SmootherClass;
+    this.smootherOptions = smootherOptions;
+    this.xSmoother = new SmootherClass(smootherOptions);
+    this.ySmoother = new SmootherClass(smootherOptions);
+    this.timestamp = null;
+    this.n = 0;
+    this._displayAttributes = {};
+    this.angleRange = '-piToPi';
+    this.onChange = null; // Add onChange property
+    this.reset();
+  }
+
+  /**
+   * Resets the smoothers and counters.
+   * Initializes the smoothers with the current polar x/y values.
+   */
+  reset() {
+    this.xSmoother.reset();
+    this.ySmoother.reset();
+    // Optionally, initialize with current values
+    if (typeof this.polar.xValue === 'number') {
+      this.xSmoother.add(this.polar.xValue);
+    }
+    if (typeof this.polar.yValue === 'number') {
+      this.ySmoother.add(this.polar.yValue);
+    }
+    this.timestamp = null;
+    this.n = 0;
+  }
+
+  terminate() {
+    return this.polar.terminate();
+  }
+
+  /**
+   * Take a new sample from the underlying Polar object and update smoothers.
+   */
+  sample() {
+    const now = Date.now();
+    this.xSmoother.add(this.polar.xValue);
+    this.ySmoother.add(this.polar.yValue);
+    this.timestamp = now;
+    this.n++;
+    if (typeof this.onChange === 'function') {
+      this.onChange();
+    }
+    return this;
+  }
+
+  setAngleRange(range) {
+    if (range === '0to2pi' || range === '-piToPi') {
+      this.angleRange = range;
+    }
+  }
+
+  setDisplayAttributes(attr) {
+    this._displayAttributes = attr;
+  }
+
+  /**
+   * Send an update message for an array of PolarSmoother instances.
+   * Uses the pathMagnitude and pathAngle from the underlying polar object.
+   * @param {Object} app - The application instance.
+   * @param {string} pluginId - The plugin identifier.
+   * @param {PolarSmoother[]} polarsSmoothed - Array of PolarSmoother instances.
+   */
+  static send(app, pluginId, polarsSmoothed) {
+    let values = [];
+    polarsSmoothed.forEach(ps => {
+      values.push({
+        path: ps.polar.pathMagnitude,
+        value: ps.magnitude
+      });
+      values.push({
+        path: ps.polar.pathAngle,
+        value: ps.angle
+      });
+    });
+    const message = {
+      context: 'vessels.self',
+      updates: [
+        {
+          source: {
+            label: pluginId
+          },
+          values: values
+        }
+      ]
+    };
+    app.handleMessage(pluginId, message);
+  }
+
+  get displayAttributes() {
+    return { ...this._displayAttributes, stale: this.stale };
+  }
+
+  get x() {
+    return this.xSmoother.estimate;
+  }
+
+  get y() {
+    return this.ySmoother.estimate;
+  }
+
+  get xVariance() {
+    return this.xSmoother.variance;
+  }
+
+  get yVariance() {
+    return this.ySmoother.variance;
+  }
+
+  get vectorValue() {
+    return { x: this.x, y: this.y };
+  }
+
+  get vector() {
+    return [this.x, this.y];
+  }
+
+  get magnitude() {
+    return Math.sqrt(this.x * this.x + this.y * this.y);
+  }
+
+  get angle() {
+    return this._formatAngle(Math.atan2(this.y, this.x));
+  }
+
+  get polarValue() {
+    return {
+      magnitude: this.magnitude,
+      angle: this.angle
+    };
+  }
+
+  get variance() {
+    return [this.xVariance, this.yVariance];
+  }
+
+  get timestamp() {
+    return this._timestamp;
+  }
+
+  set timestamp(val) {
+    this._timestamp = val;
+  }
+
+  get nSamples() {
+    return this.n;
+  }
+
+  get stale() {
+    return this.polar.stale;
+  }
+
+  report() {
+    return {
+      id: this.id,
+      x: this.x,
+      y: this.y,
+      magnitude: this.magnitude,
+      angle: this.angle,
+      displayAttributes: this.displayAttributes,
+      xVariance: this.xVariance,
+      yVariance: this.yVariance
+    };
+  }
+
+  _formatAngle(angle) {
+    if (this.angleRange === '0to2pi') {
+      return (angle < 0) ? angle + 2 * Math.PI : angle;
+    }
+    // default: -pi to pi
+    return angle;
+  }
+}
+
+
+
+
+/**
+ * Creates a Polar and a linked PolarSmoother, wires up onChange, and sets display attributes.
+ * @param {Object} options
+ * @param {string} options.id - Identifier for the polar.
+ * @param {string} options.pathMagnitude - Signal K path for magnitude.
+ * @param {string} options.subscribe - Subscribe to path.
+ * @param {string} options.pathAngle - Signal K path for angle.
+ * @param {string} options.sourceMagnitude - Source label for magnitude.
+ * @param {string} options.sourceAngle - Source label for angle.
+ * @param {Object} options.app - The app instance.
+ * @param {string} options.pluginId - Plugin identifier.
+ * @param {Function} [options.SmootherClass=ExponentialSmoother] - Smoother class to use.
+ * @param {Object} [options.smootherOptions={}] - Options for the smoother.
+ * @param {Object} [options.displayAttributes={}] - Display attributes for the smoother.
+ * @param {boolean} [options.passOn=true] - Pass on subscription.
+ * @param {Function} [options.onIdle=null] - Optional onIdle callback.
+ * @param {String} [options.angleRange='-piToPi'] - Angle range for the polar coordinates, valid values are '0to2pi' or '-piToPi'.
+ * @returns {{ polar: Polar, smoother: PolarSmoother }}
+ */
+function createSmoothedPolar({
+  id,
+  pathMagnitude,
+  pathAngle,
+  subscribe = false,
+  sourceMagnitude,
+  sourceAngle,
+  app,
+  pluginId,
+  SmootherClass = PolarSmoother,
+  smootherOptions = {},
+  displayAttributes = {},
+  passOn = true,
+  onIdle = null,
+  angleRange = '-piToPi'
+}) {
+  const polar = new Polar(id, pathMagnitude, pathAngle, sourceMagnitude, sourceAngle);
+  polar.setAngleRange(angleRange);
+  if (subscribe) polar.subscribe(app, pluginId, true, true, passOn, onIdle);
+  const smoother = new PolarSmoother(id, polar, SmootherClass, smootherOptions);
+  polar.onChange = () => { smoother.sample(); };
+  smoother.setDisplayAttributes(displayAttributes);
+  return smoother;
+}
+
+
+
+
+
+module.exports = { Polar, PolarDamped, PolarSmoother, createSmoothedPolar };

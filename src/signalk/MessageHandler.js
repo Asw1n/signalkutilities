@@ -1,5 +1,10 @@
-// Statistical smoothing and variance tracking for MessageHandler values, analogous to PolarDamped
+// Statistical smoothing and variance tracking for MessageHandler values, using Smoother classes
 
+const { MovingAverageSmoother, ExponentialSmoother, KalmanSmoother } = require('./smoothers');
+
+/**
+ * @deprecated Use MessageSmoother instead.
+ */
 class MessageHandlerDamped {
   constructor(id, handler, timeConstant = 1.0) { // τ in seconds
     this.id = id;
@@ -121,6 +126,133 @@ class MessageHandlerDamped {
     return this.handler.frequency;
   }
 }
+
+/**
+ * MessageHandlerSmoothed wraps a MessageHandler and applies a smoothing algorithm
+ * using a specified Smoother class (MovingAverageSmoother, ExponentialSmoother, KalmanSmoother).
+ *
+ * @param {string} id - Identifier for this handler.
+ * @param {MessageHandler} handler - The underlying MessageHandler instance.
+ * @param {Function} SmootherClass - The smoother class to use (e.g., ExponentialSmoother).
+ * @param {Object} [smootherOptions={}] - Options to pass to the smoother.
+ */
+class MessageSmoother {
+  constructor(id, handler, SmootherClass = ExponentialSmoother, smootherOptions = {}) {
+    this.id = id;
+    this.handler = handler;
+    this.SmootherClass = SmootherClass;
+    this.smootherOptions = smootherOptions;
+    this.smoother = null;
+    this.timestamp = null;
+    this.n = 0;
+    this._displayAttributes = {};
+    this._isObject = false;
+    this._propertyKeys = null;
+    this.onChange = null; // Add onChange property
+    this.reset();
+  }
+
+  /**
+   * Resets the smoother(s) and determines the value type (scalar or object).
+   * Initializes appropriate smoother(s) for the value type.
+   */
+  reset() {
+    this.timestamp = null;
+    this.n = 0;
+    this._isObject = false;
+    this._propertyKeys = null;
+    this.smoother = null;
+
+    const handlerValue = this.handler.value;
+    if (typeof handlerValue === 'number') {
+      this._isObject = false;
+      this.smoother = new this.SmootherClass(this.smootherOptions);
+    } else if (handlerValue && typeof handlerValue === 'object') {
+      this._isObject = true;
+      this._propertyKeys = Object.keys(handlerValue).filter(
+        key => typeof handlerValue[key] === 'number'
+      );
+      this.smoother = {};
+      for (const key of this._propertyKeys) {
+        this.smoother[key] = new this.SmootherClass(this.smootherOptions);
+      }
+    }
+  }
+
+  terminate() {
+    return this.handler.terminate();
+  }
+
+  sample() {
+    const now = Date.now();
+    const handlerValue = this.handler.value;
+    if (!this.smoother) {
+      this.reset();
+    }
+    if (!this._isObject) {
+      this.smoother.add(handlerValue);
+    } else if (handlerValue && typeof handlerValue === 'object') {
+      for (const key of this._propertyKeys) {
+        this.smoother[key].add(handlerValue[key]);
+      }
+    }
+    this.timestamp = now;
+    this.n++;
+    if (typeof this.onChange === 'function') {
+      this.onChange();
+    }
+    return this;
+  }
+
+  get value() {
+    if (this._isObject && this.smoother) {
+      const result = {};
+      for (const key of this._propertyKeys) {
+        result[key] = this.smoother[key].estimate;
+      }
+      return result;
+    }
+    return this.smoother ? this.smoother.estimate : undefined;
+  }
+
+  get variance() {
+    if (this._isObject && this.smoother) {
+      const result = {};
+      for (const key of this._propertyKeys) {
+        result[key] = this.smoother[key].variance;
+      }
+      return result;
+    }
+    return this.smoother ? this.smoother.variance : undefined;
+  }
+
+  get stale() {
+    return this.handler.stale;
+  }
+
+  setDisplayAttributes(attr) {
+    this._displayAttributes = attr;
+  }
+
+  get displayAttributes() {
+    return { ...this._displayAttributes, stale: this.stale };
+  }
+
+  report() {
+    return {
+      id: this.id,
+      value: this.value,
+      variance: this.variance,
+      timestamp: this.timestamp,
+      displayAttributes: this.displayAttributes
+    };
+  }
+
+  get frequency() {
+    return this.handler.frequency;
+  }
+}
+
 class MessageHandler {
   terminate(app) {
     this.onChange = null;
@@ -271,8 +403,42 @@ class MessageHandler {
   }
 }
 
+/**
+ * Creates a MessageHandler and a linked MessageSmoother.
+ * @param {string} id - Identifier for the handler.
+ * @param {string} path - Signal K path.
+ * @param {string} source - Source label.
+ * @param {boolean} subscribe - Subscribe to path.
+ * @param {Object} app - The app instance.
+ * @param {string} pluginId - Plugin identifier.
+ * @param {Function} SmootherClass - The smoother class to use.
+ * @param {Object} smootherOptions - Options for the smoother.
+ * @param {Object} displayAttributes - Display attributes for the smoother.
+ * @param {Function} [onIdle] - Optional onIdle callback.
+ * @returns {{ handler: MessageHandler, smoother: MessageSmoother }}
+ */
+function createSmoothedHandler({
+  id,
+  path,
+  source,
+  subscribe = false,
+  app,
+  pluginId,
+  SmootherClass = MessageSmoother,
+  smootherOptions = {},
+  displayAttributes = {},
+  onIdle = null
+}) {
+  const handler = new MessageHandler(id, path, source);
+  if (subscribe) {
+    handler.subscribe(app, pluginId, true, onIdle);
+    handler.onChange = () => { smoother.sample(); };
+  }
+  const smoother = new MessageSmoother(id, handler, SmootherClass, smootherOptions);
+  smoother.setDisplayAttributes(displayAttributes);
+  return smoother;
+}
 
-
-module.exports = { MessageHandler, MessageHandlerDamped };
+module.exports = { MessageHandler, MessageHandlerDamped, MessageSmoother, createSmoothedHandler };
 
 
