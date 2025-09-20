@@ -149,7 +149,6 @@ class MessageSmoother {
     this._isObject = false;
     this._propertyKeys = null;
     this.onChange = null; // Add onChange property
-    this.reset();
   }
 
   /**
@@ -176,6 +175,8 @@ class MessageSmoother {
       for (const key of this._propertyKeys) {
         this.smoother[key] = new this.SmootherClass(this.smootherOptions);
       }
+    } else {
+      this.smoother = null; // No valid value yet
     }
   }
 
@@ -184,13 +185,15 @@ class MessageSmoother {
   }
 
   sample() {
+    if (this.n === 0) this.reset();
     const now = Date.now();
     const handlerValue = this.handler.value;
+    const handlerVariance = this.handler.variance;
     if (!this.smoother) {
       this.reset();
     }
     if (!this._isObject) {
-      this.smoother.add(handlerValue);
+      this.smoother.add(handlerValue, handlerVariance);
     } else if (handlerValue && typeof handlerValue === 'object') {
       for (const key of this._propertyKeys) {
         this.smoother[key].add(handlerValue[key]);
@@ -226,12 +229,29 @@ class MessageSmoother {
     return this.smoother ? this.smoother.variance : undefined;
   }
 
+  get standardError() {
+    if (this._isObject && this.smoother) {
+      const result = {};
+      for (const key of this._propertyKeys) {
+        if (typeof this.smoother[key].standardError === 'function'){
+          result[key] = this.smoother[key].standardError;
+        }
+      }
+      return result;
+    }
+    return this.smoother ? this.smoother.standardError : undefined;
+  }
+
   get stale() {
     return this.handler.stale;
   }
 
   setDisplayAttributes(attr) {
     this._displayAttributes = attr;
+  }
+
+  setDisplayAttribute(key, value) {
+    this._displayAttributes[key] = value;
   }
 
   get displayAttributes() {
@@ -243,8 +263,8 @@ class MessageSmoother {
       id: this.id,
       value: this.value,
       variance: this.variance,
-      timestamp: this.timestamp,
-      displayAttributes: this.displayAttributes
+      displayAttributes: this.displayAttributes,
+      variance: this.variance
     };
   }
 
@@ -379,6 +399,10 @@ class MessageHandler {
   setDisplayAttributes(attr) {
     this._displayAttributes = attr;
     return this;
+  }
+
+  setDisplayAttribute(key, value) {
+    this._displayAttributes[key] = value;
   }
 
   /**

@@ -120,6 +120,10 @@ class Polar {
     this._displayAttributes = attr;
   }
 
+  setDisplayAttribute(key, value) {
+    this._displayAttributes[key] = value;
+  }
+
   set x(value) {
     this.xValue = value;
   }
@@ -392,7 +396,7 @@ class PolarSmoother {
     this._displayAttributes = {};
     this.angleRange = '-piToPi';
     this.onChange = null; // Add onChange property
-    this.reset();
+    //this.reset();
   }
 
   /**
@@ -403,12 +407,12 @@ class PolarSmoother {
     this.xSmoother.reset();
     this.ySmoother.reset();
     // Optionally, initialize with current values
-    if (typeof this.polar.xValue === 'number') {
-      this.xSmoother.add(this.polar.xValue);
-    }
-    if (typeof this.polar.yValue === 'number') {
-      this.ySmoother.add(this.polar.yValue);
-    }
+    // if (typeof this.polar.xValue === 'number') {
+    //   this.xSmoother.add(this.polar.xValue);
+    // }
+    // if (typeof this.polar.yValue === 'number') {
+    //   this.ySmoother.add(this.polar.yValue);
+    // }
     this.timestamp = null;
     this.n = 0;
   }
@@ -440,6 +444,10 @@ class PolarSmoother {
 
   setDisplayAttributes(attr) {
     this._displayAttributes = attr;
+  }
+
+  setDisplayAttribute(key, value) {
+    this._displayAttributes[key] = value;
   }
 
   /**
@@ -538,6 +546,10 @@ class PolarSmoother {
     return this.polar.stale;
   }
 
+  get trace() {
+    return Math.sqrt(this.xVariance ** 2 + this.yVariance ** 2);
+  }
+
   report() {
     return {
       id: this.id,
@@ -546,8 +558,7 @@ class PolarSmoother {
       magnitude: this.magnitude,
       angle: this.angle,
       displayAttributes: this.displayAttributes,
-      xVariance: this.xVariance,
-      yVariance: this.yVariance
+      trace: this.trace
     };
   }
 

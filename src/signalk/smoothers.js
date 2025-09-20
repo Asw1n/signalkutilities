@@ -8,13 +8,15 @@ class BaseSmoother {
     this.reset();
   }
 
-  reset() {
+  reset(estimate=0, variance =0) {
     // Reset the smoother state
-    this._estimate = null;
-    this._variance = null;
+    this._estimate = estimate;
+    this._variance = variance;
   }
 
-  add(value) {  
+  add(value, variance = 0) {  
+    this._estimate = value;
+    this._variance = variance;
   }
 
   get estimate() {
@@ -51,11 +53,16 @@ class MovingAverageSmoother extends BaseSmoother {
   }
 
   add(value) {
+    // nb, variance cannot be used here
     this._window.push({ value, timestamp: Date.now() });
-    const cutoff = Date.now() - this._timeSpan;
+    const cutoff = Date.now() - this._timeSpan*1000;
     this._window = this._window.filter(entry => entry.timestamp >= cutoff);
     this._estimate = this._window.reduce((sum, entry) => sum + entry.value, 0) / this._window.length;
     this._variance = this._window.reduce((sum, entry) => sum + Math.pow(entry.value - this._estimate, 2), 0) / this._window.length;
+  }
+
+  get standardError() {
+    return this._variance !== null && this._window.length > 0 ? Math.sqrt(this._variance / this._window.length) : null;
   }
 }
 
@@ -107,30 +114,44 @@ class KalmanSmoother extends BaseSmoother {
    */
   constructor(options = {}) {
     super(options);
+    this.reset();
   } 
   reset() {
     super.reset();
+    if (isFinite(this._options.steadyState) ) {
+      const K = this._options.steadyState;
+      if (K <= 0 || K >= 1) {
+        throw new Error('steadyState must be between 0 and 1 (exclusive)');
+      }
+      const ratio = (K * K - K) / (K - 1);
+      this._measurementVariance = 1/ratio ;
+      this._processVariance = 1;
+    }
+    else {
     this._processVariance = this._options.processVariance || 1; 
     this._measurementVariance = this._options.measurementVariance || 4; 
+  }
     this._estimate = null;
     this._variance = null; 
   } 
-  add(value) {
+
+  add(value, measurementVariance = this._measurementVariance) {
     if (this._estimate === null) {
       this._estimate = value;
-      this._variance = this._measurementVariance;
+      this._variance = measurementVariance;
       return;
     }
     // Prediction step
     this._variance += this._processVariance;  
     // Update step
-    const kalmanGain = this._variance / (this._variance + this._measurementVariance);
+    const kalmanGain = this._variance / (this._variance + measurementVariance);
     this._estimate += kalmanGain * (value - this._estimate);
     this._variance *= (1 - kalmanGain);
   }
 }
 
 module.exports = {
+  BaseSmoother,
   MovingAverageSmoother,
   ExponentialSmoother,
   KalmanSmoother
