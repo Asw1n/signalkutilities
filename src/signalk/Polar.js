@@ -38,10 +38,9 @@ class Polar {
     this.magnitudeHandler = new MessageHandler(this.id + "Magnitude", this.pathMagnitude, this.sourceMagnitude);
     this.angleHandler = new MessageHandler(this.id + "Angle", this.pathAngle, this.sourceAngle);
     this.onChange = null;
-    // initialise to unit vector
-    this.magnitudeHandler.value = 1;
+    this.magnitudeHandler.value = 0;
     this.angleHandler.value = 0;
-    this.xValue = 1;
+    this.xValue = 0;
     this.yValue = 0;
     this._displayAttributes = {};
     this.angleRange = '-piToPi';
@@ -284,9 +283,9 @@ class PolarSmoother {
    * Resets the smoothers and counters.
    * Initializes the smoothers with the current polar x/y values.
    */
-  reset() {
-    this.xSmoother.reset();
-    this.ySmoother.reset();
+  reset(xValue = null, yValue = null, xVariance = null, yVariance = null) {
+    this.xSmoother.reset(xValue, xVariance);
+    this.ySmoother.reset(yValue, yVariance);
     // Optionally, initialize with current values
     // if (typeof this.polar.xValue === 'number') {
     //   this.xSmoother.add(this.polar.xValue);

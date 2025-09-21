@@ -89,15 +89,7 @@ class Table2D {
     // Sort by normalized distance
     cells.sort((a, b) => a.dist - b.dist);
     // Take the N closest cells
-    const closest = cells.slice(0, N);
-    // Calculate weights and normalized weights
-    const weights = closest.map(c => 1 / (c.dist + 1e-6));
-    const weightSum = weights.reduce((a, b) => a + b, 0);
-    return closest.map((c, idx) => ({
-      ...c,
-      weight: weights[idx],
-      normWeight: weights[idx] / weightSum
-    }));
+    return cells.slice(0, N);
   }
 }
 

@@ -109,14 +109,14 @@ class ExponentialSmoother extends BaseSmoother {
 class KalmanSmoother extends BaseSmoother {
   /**
    * @param {Object} [options={}] - Configuration options.
-   * @param {number} [options.processVariance=1] - Process variance (Q) for the Kalman filter.
-   * @param {number} [options.measurementVariance=4] - Measurement variance (R) for the Kalman filter.
+   * @param {number} [options.processVariance=.1] - Process variance (Q) for the Kalman filter.
+   * @param {number} [options.measurementVariance=.4] - Measurement variance (R) for the Kalman filter.
    */
   constructor(options = {}) {
     super(options);
     this.reset();
   } 
-  reset() {
+  reset(estimate=null, variance=null) {
     super.reset();
     if (isFinite(this._options.steadyState) ) {
       const K = this._options.steadyState;
@@ -131,8 +131,8 @@ class KalmanSmoother extends BaseSmoother {
     this._processVariance = this._options.processVariance || 1; 
     this._measurementVariance = this._options.measurementVariance || 4; 
   }
-    this._estimate = null;
-    this._variance = null; 
+    this._estimate = estimate;
+    this._variance = variance;
   } 
 
   add(value, measurementVariance = this._measurementVariance) {
