@@ -45,6 +45,8 @@ class Polar {
     this.yValue = 0;
     this._displayAttributes = {};
     this.angleRange = '-piToPi';
+    this.xVariance = 0;
+    this.yVariance = 0;
   }
   setAngleRange(range) {
     if (range === '0to2pi' || range === '-piToPi') {
@@ -73,6 +75,8 @@ class Polar {
   processChanges() {
     this.xValue = this.magnitudeHandler.value * Math.cos(this.angleHandler.value);
     this.yValue = this.magnitudeHandler.value * Math.sin(this.angleHandler.value);
+    this.xVariance = 0;
+    this.yVariance = 0;
     if (typeof this.onChange === 'function') {
       this.onChange();
     }
@@ -81,15 +85,21 @@ class Polar {
   copyFrom(polar) {
     this.xValue = polar.x;
     this.yValue = polar.y;
+    this.xVariance = polar.xVariance;
+    this.yVariance = polar.yVariance;
   }
 
   substract(polar) {
     this.xValue -= polar.x;
     this.yValue -= polar.y;
+    this.xVariance += polar.xVariance;
+    this.yVariance += polar.yVariance;
   }
   add(polar) {
     this.xValue += polar.x;
     this.yValue += polar.y;
+    this.xVariance += polar.xVariance;
+    this.yVariance += polar.yVariance;
   }
 
   rotate(angle) {
@@ -97,23 +107,36 @@ class Polar {
     const sinAngle = Math.sin(angle);
     const xNew = this.xValue * cosAngle - this.yValue * sinAngle;
     const yNew = this.xValue * sinAngle + this.yValue * cosAngle;
+
+    // Variance transformation for independent x/y:
+    const xVarNew = this.xVariance * cosAngle * cosAngle + this.yVariance * sinAngle * sinAngle;
+    const yVarNew = this.xVariance * sinAngle * sinAngle + this.yVariance * cosAngle * cosAngle;
+
     this.xValue = xNew;
     this.yValue = yNew;
+    this.xVariance = xVarNew;
+    this.yVariance = yVarNew;
   }
 
   scale(factor) {
     this.xValue *= factor;
     this.yValue *= factor;
+    this.xVariance *= factor * factor;
+    this.yVariance *= factor * factor;
   }
 
   setPolarValue(value) {
     this.xValue = value.magnitude * Math.cos(value.angle);
     this.yValue = value.magnitude * Math.sin(value.angle);
+    this.xVariance = 0;
+    this.yVariance = 0;
   }
 
-  setVectorValue(value) {
+  setVectorValue(value= { x: 0, y: 0 }, variance = { x: 0, y: 0 }) {
     this.xValue = value.x;
     this.yValue = value.y;
+    this.xVariance = variance.x;
+    this.yVariance = variance.y;
   }
 
   setDisplayAttributes(attr) {
@@ -208,132 +231,8 @@ class Polar {
     return this.magnitudeHandler.stale || this.angleHandler.stale;
   }
 
-  report() {
-    return {
-      id: this.id,
-      x: this.x,
-      y: this.y,
-      magnitude: this.magnitude,
-      angle: this.angle,
-      displayAttributes: this.displayAttributes,
-    };
-  }
-
-}
-/**
- * @deprecated Use PolarSmoother instead.
- */
-class PolarDamped {
-  constructor(id, polar, timeConstant = 1.0) {   // τ in seconds
-    this.id = id;
-    this.polar = polar;
-    this.timeConstant = timeConstant;
-    this.xValue = 0;
-    this.yValue = 0;
-    this.xVar = 0;  // variance in x
-    this.yVar = 0;  // variance in y
-    this.timestamp = null;
-    this.n = 0;
-    this._displayAttributes = {};
-    this.angleRange = '-piToPi';
-  }
-
-  setAngleRange(range) {
-    if (range === '0to2pi' || range === '-piToPi') {
-      this.angleRange = range;
-    }
-  }
-
-  static send(app, pluginId, polarsDamped) {
-    let values = [];
-    polarsDamped.forEach(pd => {
-      values.push({
-        path: pd.polar.pathMagnitude,
-        value: pd.magnitude
-      });
-      values.push({
-        path: pd.polar.pathAngle,
-        value: pd.angle
-      });
-    });
-    const message = {
-      context: 'vessels.self',
-      updates: [
-        {
-          source: {
-            label: pluginId
-          },
-          values: values
-        }]
-    };
-    app.handleMessage(pluginId, message);
-  }
-
-  sample() {
-    const now = Date.now();
-    // If timeConstant is 0, instantly follow polar values, no smoothing
-    if (this.timeConstant === 0) {
-      this.xValue = this.polar.xValue;
-      this.yValue = this.polar.yValue;
-      this.xVar = 0;
-      this.yVar = 0;
-      this.timestamp = now;
-      this.n++;
-      return;
-    }
-    if (this.timestamp) {
-      const dt = (now - this.timestamp) / 1000; // seconds
-      if (dt === 0) {
-        this.timestamp = now;
-        this.n++;
-        return;
-      }
-      const factor = Math.exp(-dt / this.timeConstant);
-
-      // Save old mean before updating, ensure valid numbers
-      const prevX = (typeof this.xValue === 'number' && !isNaN(this.xValue)) ? this.xValue : this.polar.xValue;
-      const prevY = (typeof this.yValue === 'number' && !isNaN(this.yValue)) ? this.yValue : this.polar.yValue;
-
-      // Update means (exponential smoothing)
-      this.xValue = factor * prevX + (1 - factor) * this.polar.xValue;
-      this.yValue = factor * prevY + (1 - factor) * this.polar.yValue;
-
-      // Update variances (exponential smoothing of squared deviations)
-      const dx = this.polar.xValue - prevX;
-      const dy = this.polar.yValue - prevY;
-      const prevXVar = (typeof this.xVar === 'number' && !isNaN(this.xVar)) ? this.xVar : 0;
-      const prevYVar = (typeof this.yVar === 'number' && !isNaN(this.yVar)) ? this.yVar : 0;
-      this.xVar = factor * prevXVar + (1 - factor) * dx * dx;
-      this.yVar = factor * prevYVar + (1 - factor) * dy * dy;
-
-    } else {
-      // First sample initializes mean, variance = 0
-      this.xValue = this.polar.xValue;
-      this.yValue = this.polar.yValue;
-      this.xVar = 0;
-      this.yVar = 0;
-    }
-    this.timestamp = now;
-    this.n++;
-  }
-
-  get polarValue() {
-    return {
-      magnitude: Math.sqrt(this.xValue * this.xValue + this.yValue * this.yValue),
-      angle: this._formatAngle(Math.atan2(this.yValue, this.xValue))
-    };
-  }
-
-  setDisplayAttributes(attr) {
-    this._displayAttributes = attr;
-  }
-
-  get displayAttributes() {
-    return { ...this._displayAttributes, stale: this.stale };
-  }
-
-  get stale() {
-    return this.polar.stale;
+  get trace() {
+    return Math.sqrt(this.xVariance ** 2 + this.yVariance ** 2);
   }
 
   report() {
@@ -341,34 +240,16 @@ class PolarDamped {
       id: this.id,
       x: this.x,
       y: this.y,
+      xVariance: this.xVariance,
+      yVariance: this.yVariance,
       magnitude: this.magnitude,
       angle: this.angle,
+      trace: this.trace,
       displayAttributes: this.displayAttributes,
-      xVariance: this.xVar,
-      yVariance: this.yVar
     };
   }
 
-  get vectorValue() { return { x: this.xValue, y: this.yValue }; }
-  get vector() { return [this.xValue, this.yValue]; }
-  get x() { return this.xValue; }
-  get y() { return this.yValue; }
-  get magnitude() { return Math.sqrt(this.xValue * this.xValue + this.yValue * this.yValue); }
-  get angle() { return this._formatAngle(Math.atan2(this.yValue, this.xValue)); }
-
-  _formatAngle(angle) {
-    if (this.angleRange === '0to2pi') {
-      return (angle < 0) ? angle + 2 * Math.PI : angle;
-    }
-    // default: -pi to pi
-    return angle;
-  }
-  get variance() { return [this.xVar, this.yVar]; }
-
-
 }
-
-
 
 /**
  * PolarSmoother applies statistical smoothing to the cartesian (x, y) representation
@@ -426,8 +307,8 @@ class PolarSmoother {
    */
   sample() {
     const now = Date.now();
-    this.xSmoother.add(this.polar.xValue);
-    this.ySmoother.add(this.polar.yValue);
+    this.xSmoother.add(this.polar.xValue, this.polar.xVariance);
+    this.ySmoother.add(this.polar.yValue, this.polar.yVariance);
     this.timestamp = now;
     this.n++;
     if (typeof this.onChange === 'function') {
@@ -622,4 +503,4 @@ function createSmoothedPolar({
 
 
 
-module.exports = { Polar, PolarDamped, PolarSmoother, createSmoothedPolar };
+module.exports = { Polar, PolarSmoother, createSmoothedPolar };

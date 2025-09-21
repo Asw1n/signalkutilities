@@ -6,4 +6,4 @@ const Reporter = require('./src/web/Reporter');
 const { BaseSmoother, MovingAverageSmoother, ExponentialSmoother, KalmanSmoother } = require('./src/signalk/smoothers');
 
 
-module.exports = { MessageHandler, MessageHandlerDamped, MessageSmoother, Polar, PolarDamped, PolarSmoother, Table2D, SI, Reporter, BaseSmoother, MovingAverageSmoother, ExponentialSmoother, KalmanSmoother, createSmoothedHandler, createSmoothedPolar };
+module.exports = { MessageHandler, MessageHandlerDamped, MessageSmoother, Polar, PolarSmoother, Table2D, SI, Reporter, BaseSmoother, MovingAverageSmoother, ExponentialSmoother, KalmanSmoother, createSmoothedHandler, createSmoothedPolar };

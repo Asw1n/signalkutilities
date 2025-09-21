@@ -71,6 +71,34 @@ class Table2D {
     }
     return neighbours;
   }
+
+  findClosest(rowValue, colValue, N=4) {
+    // Collect all cells with their normalized distances
+    const cells = [];
+    for (let i = 0; i < this.n[0]; i++) {
+      for (let j = 0; j < this.n[1]; j++) {
+        const rowCenter = this.indexToValue(i, 0);
+        const colCenter = this.indexToValue(j, 1);
+        // Normalize by dividing by step size
+        const normRow = (rowCenter - rowValue) / this.step[0];
+        const normCol = (colCenter - colValue) / this.step[1];
+        const dist = Math.sqrt(normRow * normRow + normCol * normCol);
+        cells.push({ cell: this.table[i][j], row: i, col: j, dist });
+      }
+    }
+    // Sort by normalized distance
+    cells.sort((a, b) => a.dist - b.dist);
+    // Take the N closest cells
+    const closest = cells.slice(0, N);
+    // Calculate weights and normalized weights
+    const weights = closest.map(c => 1 / (c.dist + 1e-6));
+    const weightSum = weights.reduce((a, b) => a + b, 0);
+    return closest.map((c, idx) => ({
+      ...c,
+      weight: weights[idx],
+      normWeight: weights[idx] / weightSum
+    }));
+  }
 }
 
 module.exports = Table2D;
