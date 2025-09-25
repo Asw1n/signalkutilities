@@ -1,3 +1,7 @@
+/**
+ * Base class for statistical smoothers.
+ * Subclasses should implement their own smoothing logic.
+ */
 class BaseSmoother {
   /**
    * @param {Object} [options={}] - Configuration options for the smoother.
@@ -8,33 +12,63 @@ class BaseSmoother {
     this.reset();
   }
 
+  /**
+   * Reset the smoother state.
+   * @param {number} [estimate=0] - Initial estimate.
+   * @param {number} [variance=0] - Initial variance.
+   */
   reset(estimate=0, variance =0) {
     // Reset the smoother state
     this._estimate = estimate;
     this._variance = variance;
   }
 
+  /**
+   * Add a new value to the smoother.
+   * @param {number} value - The new value.
+   * @param {number} [variance=0] - The variance of the value.
+   */
   add(value, variance = 0) {  
     this._estimate = value;
     this._variance = variance;
   }
 
+  /**
+   * Get the current estimate.
+   * @returns {number}
+   */
   get estimate() {
     return this._estimate;
   } 
+  /**
+   * Get the current variance.
+   * @returns {number}
+   */
   get variance() {
     return this._variance;  
   }
+  /**
+   * Get the current options.
+   * @returns {Object}
+   */
   get options() {
     return this._options; 
   }
 
+  /**
+   * Set new options and reset the smoother.
+   * @param {Object} opts
+   */
   set options(opts) {
     this._options = opts;
     this.reset();
   }
 }
 
+/**
+ * Moving average smoother with a time window.
+ * Does not use variance.
+ */
 class MovingAverageSmoother extends BaseSmoother {
   /**
    * @param {Object} [options={}] - Configuration options.
@@ -44,6 +78,9 @@ class MovingAverageSmoother extends BaseSmoother {
     super(options);
   }
 
+  /**
+   * Reset the moving average window and state.
+   */
   reset() {
     super.reset();
     this._timeSpan = this._options.timeSpan || 1; 
@@ -52,6 +89,10 @@ class MovingAverageSmoother extends BaseSmoother {
     this._variance = null; 
   }
 
+  /**
+   * Add a new value to the moving average.
+   * @param {number} value - The new value.
+   */
   add(value) {
     // nb, variance cannot be used here
     this._window.push({ value, timestamp: Date.now() });
@@ -61,11 +102,18 @@ class MovingAverageSmoother extends BaseSmoother {
     this._variance = this._window.reduce((sum, entry) => sum + Math.pow(entry.value - this._estimate, 2), 0) / this._window.length;
   }
 
+  /**
+   * Get the standard error of the mean.
+   * @returns {number|null}
+   */
   get standardError() {
     return this._variance !== null && this._window.length > 0 ? Math.sqrt(this._variance / this._window.length) : null;
   }
 }
 
+/**
+ * Exponential smoother (exponential moving average).
+ */
 class ExponentialSmoother extends BaseSmoother {
   /**
    * @param {Object} [options={}] - Configuration options.
@@ -74,6 +122,10 @@ class ExponentialSmoother extends BaseSmoother {
   constructor(options = {}) {
     super(options);
   } 
+
+  /**
+   * Reset the exponential smoother state.
+   */
   reset() {
     super.reset();
     this._tau = this._options.tau || 1; 
@@ -82,6 +134,10 @@ class ExponentialSmoother extends BaseSmoother {
     this._lastTime = null;
   }
 
+  /**
+   * Add a new value to the exponential smoother.
+   * @param {number} value - The new value.
+   */
   add(value) {
     const now = Date.now();
     if (this._estimate === null) {
@@ -106,16 +162,26 @@ class ExponentialSmoother extends BaseSmoother {
   }
 }
 
+/**
+ * Kalman smoother (1D Kalman filter).
+ */
 class KalmanSmoother extends BaseSmoother {
   /**
    * @param {Object} [options={}] - Configuration options.
-   * @param {number} [options.processVariance=.1] - Process variance (Q) for the Kalman filter.
-   * @param {number} [options.measurementVariance=.4] - Measurement variance (R) for the Kalman filter.
+   * @param {number} [options.processVariance=0.1] - Process variance (Q) for the Kalman filter.
+   * @param {number} [options.measurementVariance=0.4] - Measurement variance (R) for the Kalman filter.
+   * @param {number} [options.steadyState] - Optional steady-state Kalman gain (between 0 and 1).
    */
   constructor(options = {}) {
     super(options);
     this.reset();
   } 
+
+  /**
+   * Reset the Kalman filter state.
+   * @param {number|null} [estimate] - Initial estimate.
+   * @param {number|null} [variance] - Initial variance.
+   */
   reset(estimate=null, variance=null) {
     super.reset();
     if (isFinite(this._options.steadyState) ) {
@@ -135,6 +201,11 @@ class KalmanSmoother extends BaseSmoother {
     this._variance = variance;
   } 
 
+  /**
+   * Add a new value to the Kalman filter.
+   * @param {number} value - The new value.
+   * @param {number} [measurementVariance] - Measurement variance for this value.
+   */
   add(value, measurementVariance = this._measurementVariance) {
     if (measurementVariance <= 0) {
       measurementVariance = this._measurementVariance;

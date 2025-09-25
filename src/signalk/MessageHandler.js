@@ -5,15 +5,18 @@ const { MovingAverageSmoother, ExponentialSmoother, KalmanSmoother } = require('
 
 
 /**
- * MessageHandlerSmoothed wraps a MessageHandler and applies a smoothing algorithm
+ * MessageSmoother wraps a MessageHandler and applies a smoothing algorithm
  * using a specified Smoother class (MovingAverageSmoother, ExponentialSmoother, KalmanSmoother).
  *
- * @param {string} id - Identifier for this handler.
- * @param {MessageHandler} handler - The underlying MessageHandler instance.
- * @param {Function} SmootherClass - The smoother class to use (e.g., ExponentialSmoother).
- * @param {Object} [smootherOptions={}] - Options to pass to the smoother.
+ * @class
  */
 class MessageSmoother {
+  /**
+   * @param {string} id - Identifier for this handler.
+   * @param {MessageHandler} handler - The underlying MessageHandler instance.
+   * @param {Function} [SmootherClass=ExponentialSmoother] - The smoother class to use.
+   * @param {Object} [smootherOptions={}] - Options to pass to the smoother.
+   */
   constructor(id, handler, SmootherClass = ExponentialSmoother, smootherOptions = {}) {
     // Remove: this.id = id;
     this.handler = handler;
@@ -28,6 +31,10 @@ class MessageSmoother {
     this.onChange = null; // Add onChange property
   }
 
+  /**
+   * Gets the handler id.
+   * @returns {string}
+   */
   get id() {
     return this.handler.id;
   }
@@ -61,10 +68,18 @@ class MessageSmoother {
     }
   }
 
+  /**
+   * Terminates the underlying handler.
+   * @returns {null}
+   */
   terminate() {
     return this.handler.terminate();
   }
 
+  /**
+   * Adds a new sample from the handler to the smoother(s).
+   * @returns {MessageSmoother}
+   */
   sample() {
     if (this.n === 0) this.reset();
     const now = Date.now();
@@ -88,6 +103,10 @@ class MessageSmoother {
     return this;
   }
 
+  /**
+   * Gets the current smoothed value.
+   * @returns {number|Object|undefined}
+   */
   get value() {
     if (this._isObject && this.smoother) {
       const result = {};
@@ -99,6 +118,10 @@ class MessageSmoother {
     return this.smoother ? this.smoother.estimate : undefined;
   }
 
+  /**
+   * Gets the current variance estimate.
+   * @returns {number|Object|undefined}
+   */
   get variance() {
     if (this._isObject && this.smoother) {
       const result = {};
@@ -110,6 +133,10 @@ class MessageSmoother {
     return this.smoother ? this.smoother.variance : undefined;
   }
 
+  /**
+   * Gets the current standard error estimate.
+   * @returns {number|Object|undefined}
+   */
   get standardError() {
     if (this._isObject && this.smoother) {
       const result = {};
@@ -123,22 +150,43 @@ class MessageSmoother {
     return this.smoother ? this.smoother.standardError : undefined;
   }
 
+  /**
+   * Returns true if the underlying handler is stale.
+   * @returns {boolean}
+   */
   get stale() {
     return this.handler.stale;
   }
 
+  /**
+   * Sets display attributes for UI.
+   * @param {Object} attr
+   */
   setDisplayAttributes(attr) {
     this._displayAttributes = attr;
   }
 
+  /**
+   * Sets a single display attribute.
+   * @param {string} key
+   * @param {*} value
+   */
   setDisplayAttribute(key, value) {
     this._displayAttributes[key] = value;
   }
 
+  /**
+   * Gets display attributes, including staleness.
+   * @returns {Object}
+   */
   get displayAttributes() {
     return { ...this._displayAttributes, stale: this.stale };
   }
 
+  /**
+   * Returns a summary object for reporting.
+   * @returns {Object}
+   */
   report() {
     return {
       id: this.id,
@@ -150,12 +198,49 @@ class MessageSmoother {
     };
   }
 
+  /**
+   * Gets the update frequency (Hz).
+   * @returns {number|null}
+   */
   get frequency() {
     return this.handler.frequency;
   }
 }
 
+/**
+ * Handles subscription to a Signal K path, tracks value, frequency, and staleness.
+ * @class
+ */
 class MessageHandler {
+  /**
+   * Constructs a MessageHandler.
+   * @param {string} id - Identifier for this handler.
+   * @param {string} path - Signal K path.
+   * @param {string} source - Source label.
+   */
+  constructor(id, path, source) {
+    this.id = id;
+    this.path = path;
+    this.source = typeof source === 'string' ? source.replace(/\s+/g, "") : source;
+    this.value = null;
+    this.timestamp = null;
+    this.frequency = null;
+    this.freqAlpha = 0.2;
+    this.onChange = null;
+    this._displayAttributes = {};
+    this.subscribed = false;
+    this.n = 0;
+    this.onIdle = null;
+    this.idlePeriod = 4000; // ms
+    this._idleTimer = null;
+    this.stale = false;
+  }
+
+  /**
+   * Terminates the handler, unsubscribes and clears timers.
+   * @param {Object} app - The app instance.
+   * @returns {null}
+   */
   terminate(app) {
     this.onChange = null;
     this.onIdle = null;
@@ -170,6 +255,13 @@ class MessageHandler {
     return null;
   }
 
+  /**
+   * Sends a batch of messages to Signal K.
+   * @static
+   * @param {Object} app - The app instance.
+   * @param {string} pluginId - Plugin identifier.
+   * @param {Array<{path: string, value: *}>} messages - Array of messages.
+   */
   static send(app, pluginId, messages) {
     let values = [];
     messages.forEach(delta => {
@@ -191,24 +283,14 @@ class MessageHandler {
     app.handleMessage(pluginId, message);
   }
 
-  constructor(id, path, source) {
-    this.id = id;
-    this.path = path;
-    this.source = typeof source === 'string' ? source.replace(/\s+/g, "") : source;
-    this.value = null;
-    this.timestamp = null;
-    this.frequency = null;
-    this.freqAlpha = 0.2;
-    this.onChange = null;
-    this._displayAttributes = {};
-    this.subscribed = false;
-    this.n = 0;
-    this.onIdle = null;
-    this.idlePeriod = 4000; // ms
-    this._idleTimer = null;
-    this.stale = false;
-  }
-
+  /**
+   * Subscribes to Signal K updates for the specified path and source.
+   * @param {Object} app - The app instance.
+   * @param {string} pluginId - Plugin identifier.
+   * @param {boolean} [passOn=true] - Whether to pass on the delta.
+   * @param {Function} [onIdle=null] - Callback for idle state.
+   * @returns {MessageHandler}
+   */
   subscribe(app, pluginId, passOn = true, onIdle = null) {
     this.onIdle = onIdle;
     let label = null, talker = null;
@@ -250,6 +332,11 @@ class MessageHandler {
     return this;
   }
 
+  /**
+   * Resets the idle timer for staleness detection.
+   * @private
+   * @param {Object} app - The app instance.
+   */
   _resetIdleTimer(app) {
     if (this._idleTimer) {
       clearTimeout(this._idleTimer);
@@ -264,6 +351,9 @@ class MessageHandler {
     }, this.idlePeriod);
   }
 
+  /**
+   * Updates the frequency estimate based on the latest update.
+   */
   updateFrequency() {
     const now = Date.now();
     if (this.timestamp) {
@@ -278,26 +368,45 @@ class MessageHandler {
     this.timestamp = now;
   }
 
+  /**
+   * Sets display attributes for UI.
+   * @param {Object} attr
+   * @returns {MessageHandler}
+   */
   setDisplayAttributes(attr) {
     this._displayAttributes = attr;
     return this;
   }
 
+  /**
+   * Sets a single display attribute.
+   * @param {string} key
+   * @param {*} value
+   */
   setDisplayAttribute(key, value) {
     this._displayAttributes[key] = value;
   }
 
   /**
    * @deprecated Use the 'stale' property instead.
+   * @returns {boolean}
    */
   lackingInputData() {
     return this.stale;
   }
 
+  /**
+   * Gets display attributes, including staleness.
+   * @returns {Object}
+   */
   get displayAttributes() {
     return { ...this._displayAttributes, stale: this.stale };
-  } 
+  }
 
+  /**
+   * Returns a summary object for reporting.
+   * @returns {Object}
+   */
   report() {
     return {
       id: this.id,
@@ -311,17 +420,18 @@ class MessageHandler {
 
 /**
  * Creates a MessageHandler and a linked MessageSmoother.
- * @param {string} id - Identifier for the handler.
- * @param {string} path - Signal K path.
- * @param {string} source - Source label.
- * @param {boolean} subscribe - Subscribe to path.
- * @param {Object} app - The app instance.
- * @param {string} pluginId - Plugin identifier.
- * @param {Function} SmootherClass - The smoother class to use.
- * @param {Object} smootherOptions - Options for the smoother.
- * @param {Object} displayAttributes - Display attributes for the smoother.
- * @param {Function} [onIdle] - Optional onIdle callback.
- * @returns {{ handler: MessageHandler, smoother: MessageSmoother }}
+ * @param {Object} options
+ * @param {string} options.id - Identifier for the handler.
+ * @param {string} options.path - Signal K path.
+ * @param {string} options.source - Source label.
+ * @param {boolean} [options.subscribe=false] - Subscribe to path.
+ * @param {Object} options.app - The app instance.
+ * @param {string} options.pluginId - Plugin identifier.
+ * @param {Function} [options.SmootherClass=MessageSmoother] - The smoother class to use.
+ * @param {Object} [options.smootherOptions={}] - Options for the smoother.
+ * @param {Object} [options.displayAttributes={}] - Display attributes for the smoother.
+ * @param {Function} [options.onIdle] - Optional onIdle callback.
+ * @returns {MessageSmoother}
  */
 function createSmoothedHandler({
   id,

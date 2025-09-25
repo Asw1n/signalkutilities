@@ -2,7 +2,17 @@ const { MessageHandler, MessageHandlerDamped } = require('./MessageHandler');
 const { MovingAverageSmoother, ExponentialSmoother, KalmanSmoother } = require('./smoothers');
 
 
+/**
+ * Represents a polar vector (magnitude and angle) with Signal K integration.
+ * Handles conversion between polar and cartesian, subscriptions, and variance tracking.
+ */
 class Polar {
+  /**
+   * Send an update message for an array of Polar objects.
+   * @param {Object} app - The application instance.
+   * @param {string} pluginId - The plugin identifier.
+   * @param {Polar[]} polars - Array of Polar instances.
+   */
   static send(app, pluginId, polars) {
     let values = [];
     polars.forEach(polar => {
@@ -28,7 +38,13 @@ class Polar {
     app.handleMessage(pluginId, message);
   }
 
-
+  /**
+   * @param {string} id - Identifier for this Polar.
+   * @param {string} pathMagnitude - Signal K path for magnitude.
+   * @param {string} pathAngle - Signal K path for angle.
+   * @param {string} sourceMagnitude - Source label for magnitude.
+   * @param {string} sourceAngle - Source label for angle.
+   */
   constructor(id, pathMagnitude, pathAngle, sourceMagnitude, sourceAngle) {
     this.id = id;
     this.pathMagnitude = pathMagnitude;
@@ -54,6 +70,15 @@ class Polar {
   }
 
 
+  /**
+   * Subscribe to Signal K updates for magnitude and/or angle.
+   * @param {Object} app - The app instance.
+   * @param {string} pluginId - Plugin identifier.
+   * @param {boolean} [magnitude=true] - Subscribe to magnitude.
+   * @param {boolean} [angle=true] - Subscribe to angle.
+   * @param {boolean} [passOn=true] - Pass on subscription.
+   * @param {Function} [onIdle=null] - Optional onIdle callback.
+   */
   subscribe(app, pluginId, magnitude = true, angle = true, passOn = true, onIdle = null) {
     if (magnitude) {
       this.magnitudeHandler.onChange = this.processChanges.bind(this);
@@ -65,12 +90,20 @@ class Polar {
     }
   }
 
+  /**
+   * Terminate subscriptions and handlers.
+   * @param {Object} app - The app instance.
+   * @returns {null}
+   */
   terminate(app) {
     this.magnitudeHandler.terminate(app);
     this.angleHandler.terminate(app); 
     return null;
   }
 
+  /**
+   * Process changes from handlers and update cartesian values.
+   */
   processChanges() {
     this.xValue = this.magnitudeHandler.value * Math.cos(this.angleHandler.value);
     this.yValue = this.magnitudeHandler.value * Math.sin(this.angleHandler.value);
@@ -81,6 +114,10 @@ class Polar {
     }
   }
 
+  /**
+   * Copy values from another polar object.
+   * @param {Object} polar - Object with x, y, xVariance, yVariance.
+   */
   copyFrom(polar) {
     this.xValue = polar.x;
     this.yValue = polar.y;
@@ -88,12 +125,20 @@ class Polar {
     this.yVariance = polar.yVariance;
   }
 
+  /**
+   * Subtract another polar's vector and variance from this one.
+   * @param {Object} polar - Object with x, y, xVariance, yVariance.
+   */
   substract(polar) {
     this.xValue -= polar.x;
     this.yValue -= polar.y;
     this.xVariance += polar.xVariance;
     this.yVariance += polar.yVariance;
   }
+  /**
+   * Add another polar's vector and variance to this one.
+   * @param {Object} polar - Object with x, y, xVariance, yVariance.
+   */
   add(polar) {
     this.xValue += polar.x;
     this.yValue += polar.y;
@@ -101,6 +146,10 @@ class Polar {
     this.yVariance += polar.yVariance;
   }
 
+  /**
+   * Rotate the vector by a given angle (radians).
+   * @param {number} angle
+   */
   rotate(angle) {
     const cosAngle = Math.cos(angle);
     const sinAngle = Math.sin(angle);
@@ -117,6 +166,10 @@ class Polar {
     this.yVariance = yVarNew;
   }
 
+  /**
+   * Scale the vector and variance by a factor.
+   * @param {number} factor
+   */
   scale(factor) {
     this.xValue *= factor;
     this.yValue *= factor;
@@ -124,6 +177,10 @@ class Polar {
     this.yVariance *= factor * factor;
   }
 
+  /**
+   * Set the polar value (magnitude/angle).
+   * @param {{magnitude: number, angle: number}} value
+   */
   setPolarValue(value) {
     this.xValue = value.magnitude * Math.cos(value.angle);
     this.yValue = value.magnitude * Math.sin(value.angle);
@@ -131,33 +188,52 @@ class Polar {
     this.yVariance = 0;
   }
 
-  setVectorValue(value= { x: 0, y: 0 }, variance = { x: 0, y: 0 }) {
+  /**
+   * Set the cartesian value and variance.
+   * @param {{x: number, y: number}} value
+   * @param {{x: number, y: number}} variance
+   */
+  setVectorValue(value = { x: 0, y: 0 }, variance = { x: 0, y: 0 }) {
     this.xValue = value.x;
     this.yValue = value.y;
     this.xVariance = variance.x;
     this.yVariance = variance.y;
   }
 
+  /**
+   * Set display attributes for UI.
+   * @param {Object} attr
+   */
   setDisplayAttributes(attr) {
     this._displayAttributes = attr;
   }
 
+  /**
+   * Set a single display attribute.
+   * @param {string} key
+   * @param {*} value
+   */
   setDisplayAttribute(key, value) {
     this._displayAttributes[key] = value;
   }
 
-  set x(value) {
-    this.xValue = value;
-  }
+  /** @type {number} */
+  set x(value) { this.xValue = value; }
+  /** @type {number} */
+  set y(value) { this.yValue = value; }
 
-  set y(value) {
-    this.yValue = value;
-  }
-
+  /**
+   * Get display attributes, including staleness.
+   * @returns {Object}
+   */
   get displayAttributes() {
     return { ...this._displayAttributes, stale: this.stale };
   }
 
+  /**
+   * Get the polar value as {magnitude, angle}.
+   * @returns {{magnitude: number, angle: number}}
+   */
   get polarValue() {
     return {
       magnitude: Math.sqrt(this.xValue * this.xValue + this.yValue * this.yValue),
@@ -165,30 +241,49 @@ class Polar {
     };
   }
 
+  /**
+   * Get the cartesian value as {x, y}.
+   * @returns {{x: number, y: number}}
+   */
   get vectorValue() {
     return { x: this.xValue, y: this.yValue };
   }
 
+  /**
+   * Get the cartesian value as [x, y].
+   * @returns {number[]}
+   */
   get vector() {
     return [this.xValue, this.yValue];
   }
 
-  get x() {
-    return this.xValue;
-  }
+  /** @returns {number} */
+  get x() { return this.xValue; }
+  /** @returns {number} */
+  get y() { return this.yValue; }
 
-  get y() {
-    return this.yValue;
-  }
-
+  /**
+   * Get the magnitude (length) of the vector.
+   * @returns {number}
+   */
   get magnitude() {
     return Math.sqrt(this.xValue * this.xValue + this.yValue * this.yValue);
   }
 
+  /**
+   * Get the angle (radians) of the vector.
+   * @returns {number}
+   */
   get angle() {
     return this._formatAngle(Math.atan2(this.yValue, this.xValue));
   }
 
+  /**
+   * Format angle according to angleRange.
+   * @private
+   * @param {number} angle
+   * @returns {number}
+   */
   _formatAngle(angle) {
     if (this.angleRange === '0to2pi') {
       return (angle < 0) ? angle + 2 * Math.PI : angle;
@@ -197,6 +292,10 @@ class Polar {
     return angle;
   }
 
+  /**
+   * Get the update frequency (Hz).
+   * @returns {number|null}
+   */
   get frequency() {
     const f1 = this.magnitudeHandler.subscribed ? this.magnitudeHandler.frequency : null;
     const f2 = this.angleHandler.subscribed ? this.angleHandler.frequency : null;
@@ -208,6 +307,10 @@ class Polar {
     return null;
   }
 
+  /**
+   * Get the latest timestamp.
+   * @returns {number|null}
+   */
   get timestamp() {
     const f1 = this.magnitudeHandler.subscribed ? this.magnitudeHandler.timestamp : null;
     const f2 = this.angleHandler.subscribed ? this.angleHandler.timestamp : null;
@@ -221,19 +324,32 @@ class Polar {
 
   /**
    * @deprecated Use the 'stale' property instead.
+   * @returns {boolean}
    */
   lackingInputData() {
     return this.stale;
   }
 
+  /**
+   * True if either handler is stale.
+   * @returns {boolean}
+   */
   get stale() {
     return this.magnitudeHandler.stale || this.angleHandler.stale;
   }
 
+  /**
+   * Get the trace (sqrt of sum of variances squared).
+   * @returns {number}
+   */
   get trace() {
     return Math.sqrt(this.xVariance ** 2 + this.yVariance ** 2);
   }
 
+  /**
+   * Get a summary object for reporting.
+   * @returns {Object}
+   */
   report() {
     return {
       id: this.id,
@@ -281,13 +397,16 @@ class PolarSmoother {
     this.onChange = null;
   }
 
-  get id() {
-    return this.polar.id;
-  }
+  /** @returns {string} */
+  get id() { return this.polar.id; }
 
   /**
    * Resets the smoothers and counters.
    * Initializes the smoothers with the current polar x/y values.
+   * @param {number|null} [xValue]
+   * @param {number|null} [yValue]
+   * @param {number|null} [xVariance]
+   * @param {number|null} [yVariance]
    */
   reset(xValue = null, yValue = null, xVariance = null, yVariance = null) {
     this.xSmoother.reset(xValue, xVariance);
@@ -296,12 +415,17 @@ class PolarSmoother {
     this.n = 0;
   }
 
+  /**
+   * Terminate the underlying polar.
+   * @returns {null}
+   */
   terminate() {
     return this.polar.terminate();
   }
 
   /**
    * Take a new sample from the underlying Polar object and update smoothers.
+   * @returns {PolarSmoother}
    */
   sample() {
     const now = Date.now();
@@ -315,14 +439,27 @@ class PolarSmoother {
     return this;
   }
 
+  /**
+   * Set the angle range for output ('0to2pi' or '-piToPi').
+   * @param {string} range
+   */
   setAngleRange(range) {
     this.polar.setAngleRange(range);
   }
 
+  /**
+   * Set display attributes for UI.
+   * @param {Object} attr
+   */
   setDisplayAttributes(attr) {
     this._displayAttributes = attr;
   }
 
+  /**
+   * Set a single display attribute.
+   * @param {string} key
+   * @param {*} value
+   */
   setDisplayAttribute(key, value) {
     this._displayAttributes[key] = value;
   }
@@ -360,42 +497,59 @@ class PolarSmoother {
     app.handleMessage(pluginId, message);
   }
 
+  /**
+   * Get display attributes, including staleness.
+   * @returns {Object}
+   */
   get displayAttributes() {
     return { ...this._displayAttributes, stale: this.stale };
   }
 
-  get x() {
-    return this.xSmoother.estimate;
-  }
+  /** @returns {number} */
+  get x() { return this.xSmoother.estimate; }
+  /** @returns {number} */
+  get y() { return this.ySmoother.estimate; }
+  /** @returns {number} */
+  get xVariance() { return this.xSmoother.variance; }
+  /** @returns {number} */
+  get yVariance() { return this.ySmoother.variance; }
 
-  get y() {
-    return this.ySmoother.estimate;
-  }
-
-  get xVariance() {
-    return this.xSmoother.variance;
-  }
-
-  get yVariance() {
-    return this.ySmoother.variance;
-  }
-
+  /**
+   * Get the cartesian value as {x, y}.
+   * @returns {{x: number, y: number}}
+   */
   get vectorValue() {
     return { x: this.x, y: this.y };
   }
 
+  /**
+   * Get the cartesian value as [x, y].
+   * @returns {number[]}
+   */
   get vector() {
     return [this.x, this.y];
   }
 
+  /**
+   * Get the magnitude (length) of the vector.
+   * @returns {number}
+   */
   get magnitude() {
     return Math.sqrt(this.x * this.x + this.y * this.y);
   }
 
+  /**
+   * Get the angle (radians) of the vector.
+   * @returns {number}
+   */
   get angle() {
     return this._formatAngle(Math.atan2(this.y, this.x));
   }
 
+  /**
+   * Get the polar value as {magnitude, angle}.
+   * @returns {{magnitude: number, angle: number}}
+   */
   get polarValue() {
     return {
       magnitude: this.magnitude,
@@ -403,58 +557,73 @@ class PolarSmoother {
     };
   }
 
+  /**
+   * Get the variance as [xVariance, yVariance].
+   * @returns {number[]}
+   */
   get variance() {
     return [this.xVariance, this.yVariance];
   }
 
+  /**
+   * Get the latest timestamp.
+   * @returns {number|null}
+   */
   get timestamp() {
     return this._timestamp ?? this.polar.timestamp;
   }
 
+  /**
+   * Set the timestamp.
+   * @param {number} val
+   */
   set timestamp(val) {
     this._timestamp = val;
   }
 
+  /**
+   * Get the number of samples taken.
+   * @returns {number}
+   */
   get nSamples() {
     return this.n;
   }
 
+  /**
+   * True if the underlying polar is stale.
+   * @returns {boolean}
+   */
   get stale() {
     return this.polar.stale;
   }
 
+  /**
+   * Get the trace (sqrt of sum of variances squared).
+   * @returns {number}
+   */
   get trace() {
     return Math.sqrt(this.xVariance ** 2 + this.yVariance ** 2);
   }
 
-  get pathMagnitude() {
-    return this.polar.pathMagnitude;
-  }
+  /** @returns {string} */
+  get pathMagnitude() { return this.polar.pathMagnitude; }
+  /** @returns {string} */
+  get pathAngle() { return this.polar.pathAngle; }
+  /** @returns {string} */
+  get sourceMagnitude() { return this.polar.sourceMagnitude; }
+  /** @returns {string} */
+  get sourceAngle() { return this.polar.sourceAngle; }
+  /** @returns {string} */
+  get angleRange() { return this.polar.angleRange; }
+  /** @param {string} range */
+  set angleRange(range) { this.polar.setAngleRange(range); }
+  /** @returns {number|null} */
+  get frequency() { return this.polar.frequency; }
 
-  get pathAngle() {
-    return this.polar.pathAngle;
-  }
-
-  get sourceMagnitude() {
-    return this.polar.sourceMagnitude;
-  }
-
-  get sourceAngle() {
-    return this.polar.sourceAngle;
-  }
-
-  get angleRange() {
-    return this.polar.angleRange;
-  }
-
-  set angleRange(range) {
-    this.polar.setAngleRange(range);
-  }
-
-  get frequency() {
-    return this.polar.frequency;
-  }
-
+  /**
+   * Get a summary object for reporting.
+   * @returns {Object}
+   */
   report() {
     return {
       id: this.id,
@@ -473,6 +642,12 @@ class PolarSmoother {
     };
   }
 
+  /**
+   * Format angle according to angleRange.
+   * @private
+   * @param {number} angle
+   * @returns {number}
+   */
   _formatAngle(angle) {
     if (this.angleRange === '0to2pi') {
       return (angle < 0) ? angle + 2 * Math.PI : angle;
@@ -499,7 +674,7 @@ class PolarSmoother {
  * @param {boolean} [options.passOn=true] - Pass on subscription.
  * @param {Function} [options.onIdle=null] - Optional onIdle callback.
  * @param {String} [options.angleRange='-piToPi'] - Angle range for the polar coordinates, valid values are '0to2pi' or '-piToPi'.
- * @returns {{ polar: Polar, smoother: PolarSmoother }}
+ * @returns {PolarSmoother}
  */
 function createSmoothedPolar({
   id,
@@ -525,9 +700,5 @@ function createSmoothedPolar({
   smoother.setDisplayAttributes(displayAttributes);
   return smoother;
 }
-
-
-
-
 
 module.exports = { Polar, PolarSmoother, createSmoothedPolar };
