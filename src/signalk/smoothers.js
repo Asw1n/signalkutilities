@@ -136,6 +136,9 @@ class KalmanSmoother extends BaseSmoother {
   } 
 
   add(value, measurementVariance = this._measurementVariance) {
+    if (measurementVariance <= 0) {
+      measurementVariance = this._measurementVariance;
+    }
     if (this._estimate === null) {
       this._estimate = value;
       this._variance = measurementVariance;

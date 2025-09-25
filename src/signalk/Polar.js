@@ -243,7 +243,12 @@ class Polar {
       yVariance: this.yVariance,
       magnitude: this.magnitude,
       angle: this.angle,
+      pathMagnitude: this.pathMagnitude,
+      pathAngle: this.pathAngle,
+      sourceMagnitude: this.sourceMagnitude,
+      sourceAngle: this.sourceAngle,
       trace: this.trace,
+      angleRange: this.angleRange,
       displayAttributes: this.displayAttributes,
     };
   }
@@ -265,18 +270,19 @@ class PolarSmoother {
    * @param {Object} [smootherOptions={}] - Options for the smoother.
    */
   constructor(id, polar, SmootherClass = ExponentialSmoother, smootherOptions = {}) {
-    this.id = id;
     this.polar = polar;
     this.SmootherClass = SmootherClass;
     this.smootherOptions = smootherOptions;
     this.xSmoother = new SmootherClass(smootherOptions);
     this.ySmoother = new SmootherClass(smootherOptions);
-    this.timestamp = null;
+    this._timestamp = null;
     this.n = 0;
     this._displayAttributes = {};
-    this.angleRange = '-piToPi';
-    this.onChange = null; // Add onChange property
-    //this.reset();
+    this.onChange = null;
+  }
+
+  get id() {
+    return this.polar.id;
   }
 
   /**
@@ -286,14 +292,7 @@ class PolarSmoother {
   reset(xValue = null, yValue = null, xVariance = null, yVariance = null) {
     this.xSmoother.reset(xValue, xVariance);
     this.ySmoother.reset(yValue, yVariance);
-    // Optionally, initialize with current values
-    // if (typeof this.polar.xValue === 'number') {
-    //   this.xSmoother.add(this.polar.xValue);
-    // }
-    // if (typeof this.polar.yValue === 'number') {
-    //   this.ySmoother.add(this.polar.yValue);
-    // }
-    this.timestamp = null;
+    this._timestamp = null;
     this.n = 0;
   }
 
@@ -308,7 +307,7 @@ class PolarSmoother {
     const now = Date.now();
     this.xSmoother.add(this.polar.xValue, this.polar.xVariance);
     this.ySmoother.add(this.polar.yValue, this.polar.yVariance);
-    this.timestamp = now;
+    this._timestamp = now;
     this.n++;
     if (typeof this.onChange === 'function') {
       this.onChange();
@@ -317,9 +316,7 @@ class PolarSmoother {
   }
 
   setAngleRange(range) {
-    if (range === '0to2pi' || range === '-piToPi') {
-      this.angleRange = range;
-    }
+    this.polar.setAngleRange(range);
   }
 
   setDisplayAttributes(attr) {
@@ -411,7 +408,7 @@ class PolarSmoother {
   }
 
   get timestamp() {
-    return this._timestamp;
+    return this._timestamp ?? this.polar.timestamp;
   }
 
   set timestamp(val) {
@@ -430,15 +427,49 @@ class PolarSmoother {
     return Math.sqrt(this.xVariance ** 2 + this.yVariance ** 2);
   }
 
+  get pathMagnitude() {
+    return this.polar.pathMagnitude;
+  }
+
+  get pathAngle() {
+    return this.polar.pathAngle;
+  }
+
+  get sourceMagnitude() {
+    return this.polar.sourceMagnitude;
+  }
+
+  get sourceAngle() {
+    return this.polar.sourceAngle;
+  }
+
+  get angleRange() {
+    return this.polar.angleRange;
+  }
+
+  set angleRange(range) {
+    this.polar.setAngleRange(range);
+  }
+
+  get frequency() {
+    return this.polar.frequency;
+  }
+
   report() {
     return {
       id: this.id,
       x: this.x,
       y: this.y,
+      xVariance: this.xVariance,
+      yVariance: this.yVariance,
       magnitude: this.magnitude,
       angle: this.angle,
+      pathMagnitude: this.pathMagnitude,
+      pathAngle: this.pathAngle,
+      sourceMagnitude: this.sourceMagnitude,
+      sourceAngle: this.sourceAngle,
+      trace: this.trace,
       displayAttributes: this.displayAttributes,
-      trace: this.trace
     };
   }
 
@@ -450,9 +481,6 @@ class PolarSmoother {
     return angle;
   }
 }
-
-
-
 
 /**
  * Creates a Polar and a linked PolarSmoother, wires up onChange, and sets display attributes.
