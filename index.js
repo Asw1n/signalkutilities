@@ -1,9 +1,61 @@
 const Table2D = require('./src/general/Table2D');
 const SI = require('./src/general/SI');
-const { MessageHandler, MessageHandlerDamped, MessageSmoother, createSmoothedHandler}  = require('./src/signalk/MessageHandler.js');
-const { Polar, PolarDamped, PolarSmoother, createSmoothedPolar } = require('./src/signalk/Polar');
 const Reporter = require('./src/web/Reporter');
-const { BaseSmoother, MovingAverageSmoother, ExponentialSmoother, KalmanSmoother } = require('./src/signalk/smoothers');
 
+const {
+  MessageHandler,
+  MessageSmoother,
+  createSmoothedHandler
+} = require('./src/signalk/MessageHandler.js');
 
-module.exports = { MessageHandler, MessageHandlerDamped, MessageSmoother, Polar, PolarSmoother, Table2D, SI, Reporter, BaseSmoother, MovingAverageSmoother, ExponentialSmoother, KalmanSmoother, createSmoothedHandler, createSmoothedPolar };
+const {
+  Polar,
+  PolarSmoother,
+  createSmoothedPolar
+} = require('./src/signalk/Polar');
+
+const {
+  BaseSmoother,
+  MovingAverageSmoother,
+  ExponentialSmoother,
+  KalmanSmoother
+} = require('./src/signalk/smoothers');
+
+const {
+  ApparentWind,
+  SmoothedApparentWind,
+  GroundSpeed,
+  SmoothedGroundSpeed,
+  SpeedThroughWater,
+  SmoothedSpeedThroughWater,
+  Attitude,
+  SmoothedAttitude,
+  Heading,
+  SmoothedHeading
+} = require('./src/signalk/commons');
+
+module.exports = {
+  Table2D,
+  SI,
+  Reporter,
+  MessageHandler,
+  MessageSmoother,
+  createSmoothedHandler,
+  Polar,
+  PolarSmoother,
+  createSmoothedPolar,
+  BaseSmoother,
+  MovingAverageSmoother,
+  ExponentialSmoother,
+  KalmanSmoother,
+  ApparentWind,
+  SmoothedApparentWind,
+  GroundSpeed,
+  SmoothedGroundSpeed,
+  SpeedThroughWater,
+  SmoothedSpeedThroughWater,
+  Attitude,
+  SmoothedAttitude,
+  Heading,
+  SmoothedHeading
+};
