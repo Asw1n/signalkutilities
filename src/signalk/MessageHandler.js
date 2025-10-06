@@ -283,6 +283,29 @@ class MessageHandler {
     app.handleMessage(pluginId, message);
   }
 
+  // Send meta updates for one or more paths
+  static sendMeta(app, pluginId, metaEntries) {
+    const meta = metaEntries.map(entry => ({
+      path: entry.path,
+      value: entry.value ?? entry.meta
+    }));
+    const message = {
+      context: 'vessels.self',
+      updates: [
+        {
+          source: { label: pluginId },
+          meta
+        }
+      ]
+    };
+    app.handleMessage(pluginId, message);
+  }
+
+  // Convenience for a single path
+  static setMeta(app, pluginId, path, value) {
+    return MessageHandler.sendMeta(app, pluginId, [{ path, value }]);
+  }
+
   /**
    * Subscribes to Signal K updates for the specified path and source.
    * @param {Object} app - The app instance.
@@ -440,17 +463,17 @@ function createSmoothedHandler({
   subscribe = false,
   app,
   pluginId,
-  SmootherClass = MessageSmoother,
+  SmootherClass = ExponentialSmoother, // FIX: default to ExponentialSmoother
   smootherOptions = {},
   displayAttributes = {},
   onIdle = null
 }) {
   const handler = new MessageHandler(id, path, source);
+  const smoother = new MessageSmoother(id, handler, SmootherClass, smootherOptions); // create before subscribe to avoid race
   if (subscribe) {
     handler.subscribe(app, pluginId, true, onIdle);
     handler.onChange = () => { smoother.sample(); };
   }
-  const smoother = new MessageSmoother(id, handler, SmootherClass, smootherOptions);
   smoother.setDisplayAttributes(displayAttributes);
   return smoother;
 }

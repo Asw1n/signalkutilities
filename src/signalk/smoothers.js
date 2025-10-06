@@ -128,7 +128,7 @@ class ExponentialSmoother extends BaseSmoother {
    */
   reset() {
     super.reset();
-    this._tau = this._options.tau || 1; 
+    this._tau = (this._options.tau ?? this._options.timeConstant ?? 1); // FIX: accept both keys
     this._estimate = null;
     this._variance = null;
     this._lastTime = null;

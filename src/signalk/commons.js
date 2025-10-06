@@ -50,7 +50,7 @@ class SpeedThroughWater extends Polar {
     super("boatSpeed", "navigation.speedThroughWater", "navigation.leewayAngle", source, source);
     this.setDisplayAttributes({ label: "Observed speed Through Water", plane: "Boat" });
     this.setAngleRange('-piToPi');
-    this.subscribe(app, pluginId, true, true, passOn);
+    this.subscribe(app, pluginId, true, false, passOn);
   }
 }
 

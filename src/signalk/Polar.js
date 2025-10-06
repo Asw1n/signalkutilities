@@ -1,4 +1,4 @@
-const { MessageHandler, MessageHandlerDamped } = require('./MessageHandler');
+const { MessageHandler } = require('./MessageHandler');
 const { MovingAverageSmoother, ExponentialSmoother, KalmanSmoother } = require('./smoothers');
 
 
@@ -427,7 +427,8 @@ class PolarSmoother {
   }
 
   get trace() {
-    return Math.sqrt(this.xVariance ** 2 + this.yVariance ** 2);
+    //return Math.sqrt(this.xVariance ** 2 + this.yVariance ** 2);
+    return this.xVariance + this.yVariance;
   }
 
   report() {
@@ -471,7 +472,7 @@ class PolarSmoother {
  * @param {boolean} [options.passOn=true] - Pass on subscription.
  * @param {Function} [options.onIdle=null] - Optional onIdle callback.
  * @param {String} [options.angleRange='-piToPi'] - Angle range for the polar coordinates, valid values are '0to2pi' or '-piToPi'.
- * @returns {{ polar: Polar, smoother: PolarSmoother }}
+ * @returns {PolarSmoother}
  */
 function createSmoothedPolar({
   id,

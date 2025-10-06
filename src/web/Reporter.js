@@ -57,12 +57,12 @@ report() {
 
 
 toJSON() {
-    return {
-        deltas: this.deltas ? this.deltas.map(delta => delta.toJSON()) : [],
-        polars: this.polars ? this.polars.map(polar => polar.toJSON()) : [],
-        tables: this.tables ? this.tables.map(table => table.toJSON()) : [],
-        attitudes: this.attitudes ? this.attitudes.map(attitude => attitude.toJSON()) : []
-    };
+  return {
+    deltas: this.deltas ? this.deltas.map(delta => (delta && typeof delta.toJSON === 'function') ? delta.toJSON() : delta) : [],
+    polars: this.polars ? this.polars.map(polar => (polar && typeof polar.toJSON === 'function') ? polar.toJSON() : polar) : [],
+    tables: this.tables ? this.tables.map(table => (table && typeof table.toJSON === 'function') ? table.toJSON() : table) : [],
+    attitudes: this.attitudes ? this.attitudes.map(attitude => (attitude && typeof attitude.toJSON === 'function') ? attitude.toJSON() : attitude) : []
+  };
 }
 }
 
