@@ -13,3 +13,6 @@ The class combines two MessageHandler classes using two paths that together cont
 
 ## the SmoothedPolar class
 This class is a decorator to the Polar class. It is used to smoothen the incoming vector using 1 of three available smoothers:  ExponentialSmoother, MovingAverageSmoother, KalmanSmoother. The smoothedPolar class does not support calculations. The class does support writing smoothed vectors back to SignalK.
+
+## the PolarTable class
+This class is used for managing and interpolating sailing boat polar performance data. It loads polar tables from CSV data in Jieter format containing boat performance across different True Wind Speeds (TWS) and True Wind Angles (TWA). The class provides interpolation capabilities to get smooth performance data for any wind condition, including optimal sailing angles, speeds, and VMG calculations. It supports performance adjustment scaling and handles both port and starboard tack data through automatic symmetry.
