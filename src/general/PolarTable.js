@@ -473,11 +473,19 @@ class PolarTable {
 
     // Sort the twa arrays by angle
     polar.forEach(twsEntry => {
-      twsEntry.twa.sort((a, b) => a.twa - b.twa)
+      if (twsEntry.twa && twsEntry.twa.length > 0) {
+        twsEntry.twa.sort((a, b) => a.twa - b.twa)
+      }
     })
 
     // Find beat/run angles if not already set
     polar.forEach((twsEntry, index) => {
+      // Skip entries without twa data
+      if (!twsEntry.twa || twsEntry.twa.length === 0) {
+        app && app.debug('Skipping TWS %s - no angle data available', SI.toKnots(twsEntry.tws).toFixed(0))
+        return
+      }
+      
       if (typeof twsEntry['Beat angle'] === 'undefined') {
         app && app.debug('Finding beat angle for TWS %s', SI.toKnots(twsEntry.tws).toFixed(0))
         
@@ -524,7 +532,7 @@ class PolarTable {
    */
   _addPolarPadding(polar, app) {
     // Add zero wind speed entry for low wind interpolation
-    if (polar.length > 0 && polar[0].tws > 0) {
+    if (polar.length > 0 && polar[0].tws > 0 && polar[0].twa && polar[0].twa.length > 0) {
       app && app.debug('Add a 0 line to allow interpolation at very low wind speeds')
       const zeroEntry = {
         tws: 0.0001,
@@ -541,6 +549,11 @@ class PolarTable {
 
     // Add padding at low and high wind angles for each TWS
     polar.forEach(twsEntry => {
+      // Skip entries without twa data
+      if (!twsEntry.twa || twsEntry.twa.length === 0) {
+        return
+      }
+      
       const twaArray = twsEntry.twa
       const lowTWA = twaArray[0].twa
       const lowTBS = twaArray[0].tbs
