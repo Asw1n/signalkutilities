@@ -10,6 +10,7 @@ const { MovingAverageSmoother, ExponentialSmoother, KalmanSmoother } = require('
  *
  * @class
  */
+
 class MessageSmoother {
   /**
    * @param {string} id - Identifier for this handler.
@@ -328,6 +329,10 @@ class MessageHandler {
     app.debug(`Subscribing to ${this.path}` + (this.source ? ` from source ${this.source}` : ""));
     this._resetIdleTimer(app);
     app.registerDeltaInputHandler((delta, next) => {
+      // Only process deltas for vessels.self
+      if (delta && delta.context && delta.context !== 'vessels.self') {
+        return next(delta);
+      }
       let found = false;
       delta?.updates.forEach(update => {
         if (update?.source?.label != pluginId && (!this.source || (update?.source?.label == label && update?.source?.talker == talker))) {
@@ -408,6 +413,34 @@ class MessageHandler {
    */
   setDisplayAttribute(key, value) {
     this._displayAttributes[key] = value;
+  }
+
+  /**
+  * Load Signal K metadata for this.path into displayAttributes.
+  * Merges server meta first, then any attributes already set in code.
+  * @param {Object} app - The app instance.
+  * @returns {MessageHandler}
+  */
+  loadMeta(app) {
+    if (!app || typeof app.getSelfPath !== 'function' || !this.path) {
+      return this;
+    }
+
+    try {
+      const node = app.getSelfPath(this.path);
+      if (node && node.meta && typeof node.meta === 'object') {
+        this._displayAttributes = {
+          ...node.meta,
+          ...this._displayAttributes
+        };
+      }
+    } catch (e) {
+      if (typeof app.debug === 'function') {
+        app.debug(`MessageHandler[${this.id}]: failed to load meta for ${this.path}: ${e.message}`);
+      }
+    }
+
+    return this;
   }
 
   /**
