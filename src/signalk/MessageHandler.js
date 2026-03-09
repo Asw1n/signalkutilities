@@ -2,16 +2,19 @@
 
 const { MovingAverageSmoother, ExponentialSmoother, KalmanSmoother } = require('./smoothers');
 
-
-
 /**
  * MessageSmoother wraps a MessageHandler and applies a smoothing algorithm
  * using a specified Smoother class (MovingAverageSmoother, ExponentialSmoother, KalmanSmoother).
- *
- * @class
- */
+ * It supports both scalar and object values, automatically creating smoothers for numeric properties in objects.
+ * The MessageSmootherpasses on configuration changes to the underlying MessageHandler. 
+ * 
+ **/
 
 class MessageSmoother {
+ 
+
+
+
   /**
    * @param {string} id - Identifier for this handler.
    * @param {MessageHandler} handler - The underlying MessageHandler instance.
@@ -73,8 +76,8 @@ class MessageSmoother {
    * Terminates the underlying handler.
    * @returns {null}
    */
-  terminate() {
-    return this.handler.terminate();
+  terminate(clearCallback = true) {
+    return this.handler.terminate(clearCallback);
   }
 
   /**
@@ -142,7 +145,7 @@ class MessageSmoother {
     if (this._isObject && this.smoother) {
       const result = {};
       for (const key of this._propertyKeys) {
-        if (typeof this.smoother[key].standardError === 'function'){
+        if (typeof this.smoother[key].standardError === 'function') {
           result[key] = this.smoother[key].standardError;
         }
       }
@@ -157,6 +160,33 @@ class MessageSmoother {
    */
   get stale() {
     return this.handler.stale;
+  }
+
+  /**
+   * Updates smoother options and immediately applies them to the live smoother(s).
+   * Note: this resets the smoother state, losing accumulated history.
+   * @param {Object} opts - New options to pass to the smoother.
+   */
+  setSmootherOptions(opts) {
+    this.smootherOptions = opts;
+    if (!this.smoother) return;
+    if (this._isObject) {
+      for (const key of this._propertyKeys) {
+        this.smoother[key].options = opts;
+      }
+    } else {
+      this.smoother.options = opts;
+    }
+  }
+
+  /**
+   * Replaces the smoother class and immediately recreates the live smoother(s).
+   * Note: this resets the smoother state, losing accumulated history.
+   * @param {Function} SmootherClass - The new smoother class to use.
+   */
+  setSmootherClass(SmootherClass) {
+    this.SmootherClass = SmootherClass;
+    this.reset();
   }
 
   /**
@@ -188,13 +218,22 @@ class MessageSmoother {
    * Returns a summary object for reporting.
    * @returns {Object}
    */
+  /**
+   * Returns the list of sources seen by the underlying handler.
+   * @returns {string[]}
+   */
+  getSources() {
+    return this.handler.getSources();
+  }
+
   report() {
     return {
       id: this.id,
+      path: this.handler.path,
       value: this.value,
       variance: this.variance,
-      path: this.handler.path,
       source: this.handler.source,
+      sources: this.getSources(),
       displayAttributes: this.displayAttributes
     };
   }
@@ -213,16 +252,12 @@ class MessageSmoother {
  * @class
  */
 class MessageHandler {
-  /**
-   * Constructs a MessageHandler.
-   * @param {string} id - Identifier for this handler.
-   * @param {string} path - Signal K path.
-   * @param {string} source - Source label.
-   */
+  /* Old constructor
   constructor(id, path, source) {
     this.id = id;
-    this.path = path;
-    this.source = typeof source === 'string' ? source.replace(/\s+/g, "") : source;
+    this._path = path;
+    this._source = typeof source === 'string' ? source.replace(/\s+/g, "") : source;
+
     this.value = null;
     this.timestamp = null;
     this.frequency = null;
@@ -231,28 +266,131 @@ class MessageHandler {
     this._displayAttributes = {};
     this.subscribed = false;
     this.n = 0;
-    this.onIdle = null;
+    this._onIdle = null;
     this.idlePeriod = 4000; // ms
     this._idleTimer = null;
     this.stale = false;
+    this._passOn = true;
+    this._app = null;
+    this._pluginId = null;
+  }
+    */
+
+  /**
+   * Constructs the messagehandler.
+   * @param {Object} app - The app instance.
+   * @param {string} pluginId - Plugin identifier.
+   * @param {string} id - Identifier for this handler.
+    */
+
+  constructor(app, pluginId, id) {
+
+    this._app = app;
+    this._id = id;
+    this._pluginId = pluginId;
+ 
+    this.value = null;
+    this.timestamp = null;
+    this.frequency = null;
+    this.freqAlpha = 0.2;
+    this.onChange = null;
+    this._displayAttributes = {};
+    this.subscribed = false;
+    this.n = 0;
+    this.idlePeriod = 4000; // ms
+    this._idleTimer = null;
+    this.stale = false;
+    this._passOn = true;
+    this._path="";
+    this._source="";
+    this._sources = new Set();
+    this._unsubscribes = [];      // holds unsubscribe fns pushed by subscriptionmanager
+    this._deltaGate = { active: false }; // gates registered delta handlers after terminate()
   }
 
   /**
-   * Terminates the handler, unsubscribes and clears timers.
-   * @param {Object} app - The app instance.
-   * @returns {null}
+   * Gets the handler id.
+   * @returns {string}
    */
-  terminate(app) {
-    this.onChange = null;
-    this.onIdle = null;
+  get id() {
+    return this._id;
+  }
+
+  set path(newPath) {
+    this._path = newPath;
+    this._sources = new Set();
+    if (this.subscribed ) {
+      this.terminate(false);
+      this.subscribe();
+    }
+  }
+
+  get path() {
+    return this._path;
+  }
+
+  set source(newSource) {
+    this._source = typeof newSource === 'string' ? newSource.replace(/\s+/g, "") : newSource;
+    if (this.subscribed ) {
+      this.terminate(false);
+      this.subscribe();
+    }
+  }
+
+  get source() {
+    return this._source;
+  }
+
+  set passOn(newPassOn) {
+    this._passOn = newPassOn;
+    if (this.subscribed ) {
+      this.terminate(false);
+      this.subscribe( );
+    } 
+  }
+
+  get passOn() {
+    return this._passOn;
+  }
+
+  set onChange(newOnChange) {
+    this._onChange = newOnChange;
+  }
+
+  get onChange() {
+    return this._onChange;
+  }
+
+  configure(path, source, passOn = true, onChange) {
+    this._path = path;
+    this._source = typeof source === 'string' ? source.replace(/\s+/g, "") : source;
+    this._passOn = passOn;
+    if (onChange !== undefined) this._onChange = onChange;
+    if (this.subscribed) {
+      this.terminate(false);
+      this.subscribe();
+    }
+    return this;
+  }
+
+
+  /**
+   * Terminates the handler, unsubscribes and clears timers.
+   * @param {boolean} [clearCallback=true] - If false, preserves _onChange (used for internal resubscribes).
+   */
+  terminate(clearCallback = true) {
+    if (clearCallback) this._onChange = null;
     if (this._idleTimer) {
       clearTimeout(this._idleTimer);
       this._idleTimer = null;
     }
-    if (this.subscribed) {
-      //app.registerDeltaInputHandler(null);
-    }
+    // Release subscriptionmanager subscription (passOn = true path)
+    this._unsubscribes.forEach(fn => fn());
+    this._unsubscribes = [];
+    // Neutralise any registered delta handler (passOn = false path)
+    this._deltaGate.active = false;
     this.subscribed = false;
+    this.stale = false;
     return null;
   }
 
@@ -267,7 +405,7 @@ class MessageHandler {
     let values = [];
     messages.forEach(delta => {
       values.push({
-        path: delta.path,
+        path: delta._path,
         value: delta.value
       });
     });
@@ -275,9 +413,7 @@ class MessageHandler {
       context: 'vessels.self',
       updates: [
         {
-          source: {
-            label: pluginId
-          },
+          $source: pluginId,
           values: values
         }]
     };
@@ -294,7 +430,7 @@ class MessageHandler {
       context: 'vessels.self',
       updates: [
         {
-          source: { label: pluginId },
+          $source: pluginId,
           meta
         }
       ]
@@ -307,75 +443,145 @@ class MessageHandler {
     return MessageHandler.sendMeta(app, pluginId, [{ path, value }]);
   }
 
-  /**
-   * Subscribes to Signal K updates for the specified path and source.
-   * @param {Object} app - The app instance.
-   * @param {string} pluginId - Plugin identifier.
-   * @param {boolean} [passOn=true] - Whether to pass on the delta.
-   * @param {Function} [onIdle=null] - Callback for idle state.
-   * @returns {MessageHandler}
-   */
-  subscribe(app, pluginId, passOn = true, onIdle = null) {
-    this.onIdle = onIdle;
-    let label = null, talker = null;
-    if (typeof this.source === 'string' && this.source.includes('.')) {
-      [label, talker] = this.source.split('.', 2);
-    }
-    if (!this.path || this.path === "") {
+  // subscribes to a single path and source.
+  subscribe() {
+    const path = this._path;
+    const app = this._app;
+
+    if (!path || path === "") {
       app.debug(`${this.id} is trying to subscribe to an empty path, subscription aborted`);
       this.stale = true;
       return;
     }
-    app.debug(`Subscribing to ${this.path}` + (this.source ? ` from source ${this.source}` : ""));
-    this._resetIdleTimer(app);
+
+    app.debug(`Subscribing to ${path}` + (this._source ? ` from source ${this._source}` : ""));
+    if (this._idleTimer) {
+      clearTimeout(this._idleTimer);
+      this.stale = false;
+    }
+
+    if (this._passOn) {
+      this._subscribeViaManager(path);
+    } else {
+      this._subscribeViaHandler(path);
+    }
+
+    this.subscribed = true;
+    return this;
+  }
+
+  /**
+   * Subscribes using app.subscriptionmanager (passOn = true).
+   * Provides efficient path-scoped delivery and proper unsubscription.
+   * @private
+   */
+  _subscribeViaManager(path) {
+    const app = this._app;
+    const pluginId = this._pluginId;
+    const source = this._source;
+    const label = (typeof source === 'string' && source) ? source : null;
+
+    app.subscriptionmanager.subscribe(
+      { context: 'vessels.self', subscribe: [{ path, policy: 'instant', minPeriod: 0 }] },
+      this._unsubscribes,
+      err => app.debug(`MessageHandler[${this.id}] subscription error: ${err}`),
+      delta => {
+        let found = false;
+        delta?.updates?.forEach(update => {
+          const updateSource = update?.$source ?? update?.source?.label;
+          const isOwnSource = update?.source?.label === pluginId ||
+            updateSource === pluginId ||
+            (typeof updateSource === 'string' && updateSource.startsWith(pluginId + '.'));
+          if (!isOwnSource && (!label || updateSource === label)) {
+            if (Array.isArray(update?.values)) {
+              for (const entry of update.values) {
+                if (path === entry.path) {
+                  this.value = entry.value;
+                  this.updateFrequency();
+                  found = true;
+                  if (updateSource) this._sources.add(updateSource);
+                }
+              }
+            }
+          }
+        });
+        if (found) {
+          this._resetIdleTimer();
+          if (typeof this._onChange === 'function') {
+            this._onChange();
+          }
+        }
+      }
+    );
+  }
+
+  /**
+   * Subscribes using app.registerDeltaInputHandler (passOn = false).
+   * Required when the delta must be suppressed from the stream.
+   * The handler is gated so terminate() renders it inert without deregistering it.
+   * @private
+   */
+  _subscribeViaHandler(path) {
+    const app = this._app;
+    const pluginId = this._pluginId;
+    const source = this._source;
+    const label = (typeof source === 'string' && source) ? source : null;
+    const gate = this._deltaGate;
+    gate.active = true;
+
     app.registerDeltaInputHandler((delta, next) => {
-      // Only process deltas for vessels.self
-      if (delta && delta.context && delta.context !== 'vessels.self') {
+      if (!gate.active) return next(delta);
+
+      const selfContext = app.selfContext ?? 'vessels.self';
+      if (delta && delta.context && delta.context !== selfContext) {
         return next(delta);
       }
+
       let found = false;
-      delta?.updates.forEach(update => {
-        if (update?.source?.label != pluginId && (!this.source || (update?.source?.label == label && update?.source?.talker == talker))) {
+      delta?.updates?.forEach(update => {
+        const updateSource = update?.$source ?? update?.source?.label;
+        const isOwnSource = update?.source?.label === pluginId ||
+          updateSource === pluginId ||
+          (typeof updateSource === 'string' && updateSource.startsWith(pluginId + '.'));
+        if (!isOwnSource && (!label || updateSource === label)) {
           if (Array.isArray(update?.values)) {
             for (let i = update.values.length - 1; i >= 0; i--) {
-              if (this.path == update.values[i].path) {
+              if (path === update.values[i].path) {
                 this.value = update.values[i].value;
                 this.updateFrequency();
                 found = true;
-                if (!passOn) update.values.splice(i, 1); 
+                if (updateSource) this._sources.add(updateSource);
+                update.values.splice(i, 1);
               }
             }
           }
         }
       });
       if (found) {
-        this._resetIdleTimer(app);
-        if (typeof this.onChange === 'function') {
-          this.onChange();
+        this._resetIdleTimer();
+        if (typeof this._onChange === 'function') {
+          this._onChange();
         }
       }
       next(delta);
     });
-    this.subscribed = true;
-    return this;
   }
 
   /**
    * Resets the idle timer for staleness detection.
    * @private
-   * @param {Object} app - The app instance.
-   */
-  _resetIdleTimer(app) {
+    */
+  _resetIdleTimer() {
     if (this._idleTimer) {
       clearTimeout(this._idleTimer);
+      if (this.stale) {
+        this._app.debug(`Data received for ${this.path}, clearing stale state.`);
+       }
       this.stale = false;
     }
     this._idleTimer = setTimeout(() => {
-      app.debug(`No data for ${this.path}`);
+      this._app.debug(`No data for ${this.path}`);
       this.stale = true;
-      if (typeof this.onIdle === 'function') {
-        this.onIdle(this);
-      }
     }, this.idlePeriod);
   }
 
@@ -413,6 +619,7 @@ class MessageHandler {
    */
   setDisplayAttribute(key, value) {
     this._displayAttributes[key] = value;
+    return this;
   }
 
   /**
@@ -421,13 +628,13 @@ class MessageHandler {
   * @param {Object} app - The app instance.
   * @returns {MessageHandler}
   */
-  loadMeta(app) {
-    if (!app || typeof app.getSelfPath !== 'function' || !this.path) {
+  loadMeta() {
+    if (!this.path) {
       return this;
     }
 
     try {
-      const node = app.getSelfPath(this.path);
+      const node = this._app.getSelfPath(this.path);
       if (node && node.meta && typeof node.meta === 'object') {
         this._displayAttributes = {
           ...node.meta,
@@ -439,17 +646,9 @@ class MessageHandler {
         app.debug(`MessageHandler[${this.id}]: failed to load meta for ${this.path}: ${e.message}`);
       }
     }
-
     return this;
   }
 
-  /**
-   * @deprecated Use the 'stale' property instead.
-   * @returns {boolean}
-   */
-  lackingInputData() {
-    return this.stale;
-  }
 
   /**
    * Gets display attributes, including staleness.
@@ -460,35 +659,32 @@ class MessageHandler {
   }
 
   /**
+   * Returns the list of sources seen for the subscribed path.
+   * Empty if not subscribed or no data received yet.
+   * Cleared when path changes.
+   * @returns {string[]}
+   */
+  getSources() {
+    return [...this._sources];
+  }
+
+  /**
    * Returns a summary object for reporting.
    * @returns {Object}
    */
   report() {
     return {
       id: this.id,
-      value: this.value,
       path: this.path,
+      value: this.value,
       source: this.source,
+      sources: this.getSources(),
       displayAttributes: this.displayAttributes
     }
   }
 }
 
-/**
- * Creates a MessageHandler and a linked MessageSmoother.
- * @param {Object} options
- * @param {string} options.id - Identifier for the handler.
- * @param {string} options.path - Signal K path.
- * @param {string} options.source - Source label.
- * @param {boolean} [options.subscribe=false] - Subscribe to path.
- * @param {Object} options.app - The app instance.
- * @param {string} options.pluginId - Plugin identifier.
- * @param {Function} [options.SmootherClass=MessageSmoother] - The smoother class to use.
- * @param {Object} [options.smootherOptions={}] - Options for the smoother.
- * @param {Object} [options.displayAttributes={}] - Display attributes for the smoother.
- * @param {Function} [options.onIdle] - Optional onIdle callback.
- * @returns {MessageSmoother}
- */
+
 function createSmoothedHandler({
   id,
   path,
@@ -499,12 +695,13 @@ function createSmoothedHandler({
   SmootherClass = ExponentialSmoother, // FIX: default to ExponentialSmoother
   smootherOptions = {},
   displayAttributes = {},
-  onIdle = null
-}) {
-  const handler = new MessageHandler(id, path, source);
+}) 
+{
+  const handler = new MessageHandler(app, pluginId, id);
+  handler.configure(path, source, true);
   const smoother = new MessageSmoother(id, handler, SmootherClass, smootherOptions); // create before subscribe to avoid race
   if (subscribe) {
-    handler.subscribe(app, pluginId, true, onIdle);
+    handler.subscribe();
     handler.onChange = () => { smoother.sample(); };
   }
   smoother.setDisplayAttributes(displayAttributes);

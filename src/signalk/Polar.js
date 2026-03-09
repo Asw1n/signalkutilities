@@ -19,34 +19,48 @@ class Polar {
       context: 'vessels.self',
       updates: [
         {
-          source: {
-            label: pluginId
-          },
+          $source: pluginId,
           values: values
         }]
     };
     app.handleMessage(pluginId, message);
   }
 
-
-  constructor(id, pathMagnitude, pathAngle, sourceMagnitude, sourceAngle) {
-    this.id = id;
-    this.pathMagnitude = pathMagnitude;
-    this.pathAngle = pathAngle;
-    this.sourceMagnitude = sourceMagnitude;
-    this.sourceAngle = sourceAngle;
-    this.magnitudeHandler = new MessageHandler(this.id + "Magnitude", this.pathMagnitude, this.sourceMagnitude);
-    this.angleHandler = new MessageHandler(this.id + "Angle", this.pathAngle, this.sourceAngle);
-    this.onChange = null;
-    this.magnitudeHandler.value = 0;
-    this.angleHandler.value = 0;
-    this.xValue = 0;
-    this.yValue = 0;
-    this._displayAttributes = {};
-    this.angleRange = '-piToPi';
-    this.xVariance = 0;
-    this.yVariance = 0;
+  constructor(app, pluginId, id) {
+    this._app = app;
+    this._pluginId = pluginId;
+    this._id = id;
+    this.magnitudeHandler = new MessageHandler(app, pluginId, id + "Magnitude");
+    this.angleHandler = new MessageHandler(app, pluginId, id + "Angle");
   }
+
+  /**
+   * Gets the polar id.
+   * @returns {string}
+   */
+  get id() {
+    return this._id;
+  }
+
+  configureAngle(pathAngle, sourceAngle, passOn = true) {
+    this.angleHandler.configure(pathAngle, sourceAngle, passOn);
+  }
+
+  configureMagnitude(pathMagnitude, sourceMagnitude, passOn = true) {
+    this.magnitudeHandler.configure(pathMagnitude, sourceMagnitude, passOn);
+  }
+
+  subscribe(toMagnitude = true, toAngle = true) {
+    if (toMagnitude) {
+      this.magnitudeHandler.onChange = this.processChanges.bind(this);
+         this.magnitudeHandler.subscribe();
+    } 
+    if (toAngle) {
+      this.angleHandler.onChange = this.processChanges.bind(this);
+      this.angleHandler.subscribe();
+    }
+  }
+
   setAngleRange(range) {
     if (range === '0to2pi' || range === '-piToPi') {
       this.angleRange = range;
@@ -54,20 +68,10 @@ class Polar {
   }
 
 
-  subscribe(app, pluginId, magnitude = true, angle = true, passOn = true, onIdle = null) {
-    if (magnitude) {
-      this.magnitudeHandler.onChange = this.processChanges.bind(this);
-      this.magnitudeHandler.subscribe(app, pluginId, passOn, onIdle);
-    }
-    if (angle) {
-      this.angleHandler.onChange = this.processChanges.bind(this);
-      this.angleHandler.subscribe(app, pluginId, passOn, onIdle);
-    }
-  }
 
-  terminate(app) {
-    this.magnitudeHandler.terminate(app);
-    this.angleHandler.terminate(app); 
+  terminate() {
+    this.magnitudeHandler.terminate();
+    this.angleHandler.terminate(); 
     return null;
   }
 
@@ -189,6 +193,14 @@ class Polar {
     return this._formatAngle(Math.atan2(this.yValue, this.xValue));
   }
 
+  get pathMagnitude() {
+    return this.magnitudeHandler.path;
+  }
+
+  get pathAngle() {
+    return this.angleHandler.path;
+  } 
+
   _formatAngle(angle) {
     if (this.angleRange === '0to2pi') {
       return (angle < 0) ? angle + 2 * Math.PI : angle;
@@ -219,15 +231,8 @@ class Polar {
     return null;
   }
 
-  /**
-   * @deprecated Use the 'stale' property instead.
-   */
-  lackingInputData() {
-    return this.stale;
-  }
-
   get stale() {
-    return this.magnitudeHandler.stale || this.angleHandler.stale;
+    return (this.magnitudeHandler.subscribed && this.magnitudeHandler.stale) || (this.angleHandler.subscribed && this.angleHandler.stale);
   }
 
   get trace() {
@@ -237,6 +242,8 @@ class Polar {
   report() {
     return {
       id: this.id,
+      pathMagnitude: this.magnitudeHandler.path,
+      pathAngle: this.angleHandler.path,
       x: this.x,
       y: this.y,
       xVariance: this.xVariance,
@@ -244,6 +251,8 @@ class Polar {
       magnitude: this.magnitude,
       angle: this.angle,
       trace: this.trace,
+      magnitudeSources: this.magnitudeHandler.getSources(),
+      angleSources: this.angleHandler.getSources(),
       displayAttributes: this.displayAttributes,
     };
   }
@@ -320,14 +329,41 @@ class PolarSmoother {
     if (range === '0to2pi' || range === '-piToPi') {
       this.angleRange = range;
     }
+    return this;
+  }
+
+  /**
+   * Updates smoother options and immediately applies them to the live x and y smoothers.
+   * Note: this resets the smoother state, losing accumulated history.
+   * @param {Object} opts - New options to pass to the smoothers.
+   */
+  setSmootherOptions(opts) {
+    this.smootherOptions = opts;
+    this.xSmoother.options = opts;
+    this.ySmoother.options = opts;
+    return this;
+  }
+
+  /**
+   * Replaces the smoother class and immediately recreates the x and y smoother instances.
+   * Note: this resets the smoother state, losing accumulated history.
+   * @param {Function} SmootherClass - The new smoother class to use.
+   */
+  setSmootherClass(SmootherClass) {
+    this.SmootherClass = SmootherClass;
+    this.xSmoother = new SmootherClass(this.smootherOptions);
+    this.ySmoother = new SmootherClass(this.smootherOptions);
+    return this;
   }
 
   setDisplayAttributes(attr) {
     this._displayAttributes = attr;
+    return this;
   }
 
   setDisplayAttribute(key, value) {
     this._displayAttributes[key] = value;
+    return this;
   }
 
   /**
@@ -353,9 +389,7 @@ class PolarSmoother {
       context: 'vessels.self',
       updates: [
         {
-          source: {
-            label: pluginId
-          },
+          $source: pluginId,
           values: values
         }
       ]
@@ -434,12 +468,16 @@ class PolarSmoother {
   report() {
     return {
       id: this.id,
+      pathMagnitude: this.polar.magnitudeHandler.path,
+      pathAngle: this.polar.angleHandler.path,
       x: this.x,
       y: this.y,
       magnitude: this.magnitude,
       angle: this.angle,
+      trace: this.trace,
+      magnitudeSources: this.polar.magnitudeHandler.getSources(),
+      angleSources: this.polar.angleHandler.getSources(),
       displayAttributes: this.displayAttributes,
-      trace: this.trace
     };
   }
 
@@ -470,7 +508,6 @@ class PolarSmoother {
  * @param {Object} [options.smootherOptions={}] - Options for the smoother.
  * @param {Object} [options.displayAttributes={}] - Display attributes for the smoother.
  * @param {boolean} [options.passOn=true] - Pass on subscription.
- * @param {Function} [options.onIdle=null] - Optional onIdle callback.
  * @param {String} [options.angleRange='-piToPi'] - Angle range for the polar coordinates, valid values are '0to2pi' or '-piToPi'.
  * @returns {PolarSmoother}
  */
@@ -478,7 +515,7 @@ function createSmoothedPolar({
   id,
   pathMagnitude,
   pathAngle,
-  subscribe = false,
+  subscribe = true,
   sourceMagnitude,
   sourceAngle,
   app,
@@ -487,12 +524,14 @@ function createSmoothedPolar({
   smootherOptions = {},
   displayAttributes = {},
   passOn = true,
-  onIdle = null,
   angleRange = '-piToPi'
 }) {
-  const polar = new Polar(id, pathMagnitude, pathAngle, sourceMagnitude, sourceAngle);
+
+  const polar = new Polar(app, pluginId, id);
+  polar.configureMagnitude(pathMagnitude, sourceMagnitude, passOn);
+  polar.configureAngle(pathAngle, sourceAngle, passOn);
   polar.setAngleRange(angleRange);
-  if (subscribe) polar.subscribe(app, pluginId, true, true, passOn, onIdle);
+  if (subscribe) polar.subscribe(true, true);
   const smoother = new PolarSmoother(id, polar, SmootherClass, smootherOptions);
   polar.onChange = () => { smoother.sample(); };
   smoother.setDisplayAttributes(displayAttributes);

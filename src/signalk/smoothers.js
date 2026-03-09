@@ -189,8 +189,8 @@ class KalmanSmoother extends BaseSmoother {
       if (K <= 0 || K >= 1) {
         throw new Error('steadyState must be between 0 and 1 (exclusive)');
       }
-      const ratio = (K * K - K) / (K - 1);
-      this._measurementVariance = 1/ratio ;
+      // With Q=1, the measurement variance R that produces steady-state gain K is: R = (1-K) / K²
+      this._measurementVariance = (1 - K) / (K * K);
       this._processVariance = 1;
     }
     else {
