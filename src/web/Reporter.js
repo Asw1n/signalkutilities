@@ -55,6 +55,24 @@ report() {
    return report;
 }
 
+meta() {
+  const result = {};
+  if (this.deltas) result.deltas = this.deltas.map(d => (d && typeof d.meta !== 'undefined') ? d.meta : null);
+  if (this.polars) result.polars = this.polars.map(p => (p && typeof p.meta !== 'undefined') ? p.meta : null);
+  if (this.tables) result.tables = this.tables.map(t => (t && typeof t.meta !== 'undefined') ? t.meta : null);
+  if (this.attitudes) result.attitudes = this.attitudes.map(a => (a && typeof a.meta !== 'undefined') ? a.meta : null);
+  return result;
+}
+
+state() {
+  const result = {};
+  if (this.deltas) result.deltas = this.deltas.map(d => (d && typeof d.state !== 'undefined') ? d.state : null);
+  if (this.polars) result.polars = this.polars.map(p => (p && typeof p.state !== 'undefined') ? p.state : null);
+  if (this.tables) result.tables = this.tables.map(t => (t && typeof t.state !== 'undefined') ? t.state : null);
+  if (this.attitudes) result.attitudes = this.attitudes.map(a => (a && typeof a.state !== 'undefined') ? a.state : null);
+  return result;
+}
+
 
 toJSON() {
   return {

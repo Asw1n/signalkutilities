@@ -29,7 +29,6 @@ class MessageSmoother {
     this.smoother = null;
     this.timestamp = null;
     this.n = 0;
-    this._displayAttributes = {};
     this._isObject = false;
     this._propertyKeys = null;
     this.onChange = null; // Add onChange property
@@ -190,28 +189,21 @@ class MessageSmoother {
   }
 
   /**
-   * Sets display attributes for UI.
-   * @param {Object} attr
-   */
-  setDisplayAttributes(attr) {
-    this._displayAttributes = attr;
-  }
-
-  /**
-   * Sets a single display attribute.
-   * @param {string} key
-   * @param {*} value
-   */
-  setDisplayAttribute(key, value) {
-    this._displayAttributes[key] = value;
-  }
-
-  /**
-   * Gets display attributes, including staleness.
+   * Gets static metadata for this smoother and its underlying handler.
+   * SK meta is read lazily from the handler. Absent fields are not populated here —
+   * the webapp is responsible for fallback values.
    * @returns {Object}
    */
-  get displayAttributes() {
-    return { ...this._displayAttributes, stale: this.stale };
+  get meta() {
+    return { ...this.handler.meta, smoother: { type: this.SmootherClass.name, ...this.smootherOptions } };
+  }
+
+  /**
+   * Gets dynamic state for this smoother.
+   * @returns {Object}
+   */
+  get state() {
+    return this.handler.state;
   }
 
   /**
@@ -233,8 +225,7 @@ class MessageSmoother {
       value: this.value,
       variance: this.variance,
       source: this.handler.source,
-      sources: this.getSources(),
-      displayAttributes: this.displayAttributes
+      state: this.state
     };
   }
 
@@ -294,7 +285,6 @@ class MessageHandler {
     this.frequency = null;
     this.freqAlpha = 0.2;
     this.onChange = null;
-    this._displayAttributes = {};
     this.subscribed = false;
     this.n = 0;
     this.idlePeriod = 4000; // ms
@@ -603,59 +593,27 @@ class MessageHandler {
   }
 
   /**
-   * Sets display attributes for UI.
-   * @param {Object} attr
-   * @returns {MessageHandler}
-   */
-  setDisplayAttributes(attr) {
-    this._displayAttributes = attr;
-    return this;
-  }
-
-  /**
-   * Sets a single display attribute.
-   * @param {string} key
-   * @param {*} value
-   */
-  setDisplayAttribute(key, value) {
-    this._displayAttributes[key] = value;
-    return this;
-  }
-
-  /**
-  * Load Signal K metadata for this.path into displayAttributes.
-  * Merges server meta first, then any attributes already set in code.
-  * @param {Object} app - The app instance.
-  * @returns {MessageHandler}
-  */
-  loadMeta() {
-    if (!this.path) {
-      return this;
-    }
-
-    try {
-      const node = this._app.getSelfPath(this.path);
-      if (node && node.meta && typeof node.meta === 'object') {
-        this._displayAttributes = {
-          ...node.meta,
-          ...this._displayAttributes
-        };
-      }
-    } catch (e) {
-      if (typeof app.debug === 'function') {
-        app.debug(`MessageHandler[${this.id}]: failed to load meta for ${this.path}: ${e.message}`);
-      }
-    }
-    return this;
-  }
-
-
-  /**
-   * Gets display attributes, including staleness.
+   * Gets static metadata for this handler.
+   * Lazily reads SK meta for this path on every call — no caching.
+   * SK may contribute displayName, description, units, zones, etc.
+   * If a field is absent from SK, it will not appear here — the webapp supplies fallbacks.
    * @returns {Object}
    */
-  get displayAttributes() {
-    return { ...this._displayAttributes, stale: this.stale };
+  get meta() {
+    try {
+      const skMeta = this._app.getSelfPath(this.path)?.meta ?? {};
+      return { id: this.id, path: this.path, source: this.source, idlePeriod: this.idlePeriod, ...skMeta };
+    } catch (e) {
+      return { id: this.id, path: this.path, source: this.source, idlePeriod: this.idlePeriod };
+    }
+  }
+
+  /**
+   * Gets dynamic state for this handler.
+   * @returns {Object}
+   */
+  get state() {
+    return { stale: this.stale, frequency: this.frequency, sources: this.getSources() };
   }
 
   /**
@@ -678,9 +636,8 @@ class MessageHandler {
       path: this.path,
       value: this.value,
       source: this.source,
-      sources: this.getSources(),
-      displayAttributes: this.displayAttributes
-    }
+      state: this.state
+    };
   }
 }
 
@@ -692,11 +649,9 @@ function createSmoothedHandler({
   subscribe = false,
   app,
   pluginId,
-  SmootherClass = ExponentialSmoother, // FIX: default to ExponentialSmoother
+  SmootherClass = ExponentialSmoother,
   smootherOptions = {},
-  displayAttributes = {},
-}) 
-{
+}) {
   const handler = new MessageHandler(app, pluginId, id);
   handler.configure(path, source, true);
   const smoother = new MessageSmoother(id, handler, SmootherClass, smootherOptions); // create before subscribe to avoid race
@@ -704,7 +659,6 @@ function createSmoothedHandler({
     handler.subscribe();
     handler.onChange = () => { smoother.sample(); };
   }
-  smoother.setDisplayAttributes(displayAttributes);
   return smoother;
 }
 

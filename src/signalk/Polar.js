@@ -30,6 +30,7 @@ class Polar {
     this._app = app;
     this._pluginId = pluginId;
     this._id = id;
+    this._polarMeta = {};
     this.magnitudeHandler = new MessageHandler(app, pluginId, id + "Magnitude");
     this.angleHandler = new MessageHandler(app, pluginId, id + "Angle");
   }
@@ -142,12 +143,14 @@ class Polar {
     this.yVariance = variance.y;
   }
 
-  setDisplayAttributes(attr) {
-    this._displayAttributes = attr;
+  setMeta(obj) {
+    Object.assign(this._polarMeta, obj);
+    return this;
   }
 
-  setDisplayAttribute(key, value) {
-    this._displayAttributes[key] = value;
+  setMetaField(key, value) {
+    this._polarMeta[key] = value;
+    return this;
   }
 
   set x(value) {
@@ -158,8 +161,31 @@ class Polar {
     this.yValue = value;
   }
 
-  get displayAttributes() {
-    return { ...this._displayAttributes, stale: this.stale };
+  /**
+   * Gets static metadata for this polar.
+   * Plugin-owned fields (displayName, description, plane) come from _polarMeta.
+   * Handler meta is read lazily from SK via each handler's get meta().
+   * @returns {Object}
+   */
+  get meta() {
+    return {
+      ...this._polarMeta,
+      angleRange: this.angleRange,
+      magnitude: this.magnitudeHandler.meta,
+      angle: this.angleHandler.meta,
+    };
+  }
+
+  /**
+   * Gets dynamic state for this polar.
+   * @returns {Object}
+   */
+  get state() {
+    return {
+      stale: this.stale,
+      magnitude: this.magnitudeHandler.state,
+      angle: this.angleHandler.state,
+    };
   }
 
   get polarValue() {
@@ -251,9 +277,7 @@ class Polar {
       magnitude: this.magnitude,
       angle: this.angle,
       trace: this.trace,
-      magnitudeSources: this.magnitudeHandler.getSources(),
-      angleSources: this.angleHandler.getSources(),
-      displayAttributes: this.displayAttributes,
+      state: this.state,
     };
   }
 
@@ -282,7 +306,6 @@ class PolarSmoother {
     this.ySmoother = new SmootherClass(smootherOptions);
     this.timestamp = null;
     this.n = 0;
-    this._displayAttributes = {};
     this.angleRange = '-piToPi';
     this.onChange = null; // Add onChange property
     //this.reset();
@@ -356,16 +379,6 @@ class PolarSmoother {
     return this;
   }
 
-  setDisplayAttributes(attr) {
-    this._displayAttributes = attr;
-    return this;
-  }
-
-  setDisplayAttribute(key, value) {
-    this._displayAttributes[key] = value;
-    return this;
-  }
-
   /**
    * Send an update message for an array of PolarSmoother instances.
    * Uses the pathMagnitude and pathAngle from the underlying polar object.
@@ -397,8 +410,25 @@ class PolarSmoother {
     app.handleMessage(pluginId, message);
   }
 
-  get displayAttributes() {
-    return { ...this._displayAttributes, stale: this.stale };
+  /**
+   * Gets static metadata for this smoother, delegating to the underlying polar.
+   * Adds smoother config on top.
+   * @returns {Object}
+   */
+  get meta() {
+    return { ...this.polar.meta, smoother: { type: this.SmootherClass.name, ...this.smootherOptions } };
+  }
+
+  /**
+   * Gets dynamic state for this smoother.
+   * @returns {Object}
+   */
+  get state() {
+    return {
+      stale: this.stale,
+      magnitude: this.polar.magnitudeHandler.state,
+      angle: this.polar.angleHandler.state,
+    };
   }
 
   get x() {
@@ -475,9 +505,7 @@ class PolarSmoother {
       magnitude: this.magnitude,
       angle: this.angle,
       trace: this.trace,
-      magnitudeSources: this.polar.magnitudeHandler.getSources(),
-      angleSources: this.polar.angleHandler.getSources(),
-      displayAttributes: this.displayAttributes,
+      state: this.state,
     };
   }
 
@@ -506,7 +534,7 @@ class PolarSmoother {
  * @param {string} options.pluginId - Plugin identifier.
  * @param {Function} [options.SmootherClass=ExponentialSmoother] - Smoother class to use.
  * @param {Object} [options.smootherOptions={}] - Options for the smoother.
- * @param {Object} [options.displayAttributes={}] - Display attributes for the smoother.
+ * @param {Object} [options.meta={}] - Plugin-owned metadata for the polar (e.g. displayName, description, plane).
  * @param {boolean} [options.passOn=true] - Pass on subscription.
  * @param {String} [options.angleRange='-piToPi'] - Angle range for the polar coordinates, valid values are '0to2pi' or '-piToPi'.
  * @returns {PolarSmoother}
@@ -522,7 +550,7 @@ function createSmoothedPolar({
   pluginId,
   SmootherClass = PolarSmoother,
   smootherOptions = {},
-  displayAttributes = {},
+  meta = {},
   passOn = true,
   angleRange = '-piToPi'
 }) {
@@ -531,10 +559,10 @@ function createSmoothedPolar({
   polar.configureMagnitude(pathMagnitude, sourceMagnitude, passOn);
   polar.configureAngle(pathAngle, sourceAngle, passOn);
   polar.setAngleRange(angleRange);
+  polar.setMeta(meta);
   if (subscribe) polar.subscribe(true, true);
   const smoother = new PolarSmoother(id, polar, SmootherClass, smootherOptions);
   polar.onChange = () => { smoother.sample(); };
-  smoother.setDisplayAttributes(displayAttributes);
   return smoother;
 }
 

@@ -1,3 +1,5 @@
+const fs = require('fs');
+
 class Table2D {
   constructor(id, row = { min: 0, max: 10, step: 1 }, col = { min: 0, max: 10, step: 1 }, ClassType, param) {
     this.id = id;
@@ -33,6 +35,22 @@ class Table2D {
       table: this.table.map(row => row.map(cell => cell.toJSON())),
       displayAttributes: this.displayAttributes
     };
+  }
+
+  saveToFile(filePath) {
+    const data = JSON.stringify(this.toJSON(), null, 2);
+    fs.writeFile(filePath, data, err => {
+      if (err) console.error(`Table2D: failed to save ${this.id} to ${filePath}:`, err);
+    });
+  }
+
+  static readFromFile(filePath) {
+    try {
+      const raw = fs.readFileSync(filePath, 'utf8');
+      return JSON.parse(raw);
+    } catch (e) {
+      return null;
+    }
   }
 
   static fromJSON(data, ClassType) {

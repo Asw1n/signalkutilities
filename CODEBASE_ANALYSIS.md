@@ -192,7 +192,7 @@ handler.passOn = true;              // keep delta in stream, false = consume it
 handler.onChange = () => { ... };   // called on every new value
 ```
 
-Or via fluent `setSubscription(path, source, passOn, onChange)`.
+Or via fluent `configure(path, source, passOn, onChange)`.
 
 **Subscription**:
 ```js
@@ -264,8 +264,8 @@ new Polar(app, pluginId, id)
 
 After construction, configure subscriptions:
 ```js
-polar.setMagnitudeSubscription(path, source, passOn?)
-polar.setAngleSubscription(path, source, passOn?)
+polar.configureMagnitude(path, source, passOn?)
+polar.configureAngle(path, source, passOn?)
 polar.setAngleRange('0to2pi' | '-piToPi')  // default: '-piToPi'
 polar.subscribe(toMagnitude?, toAngle?)
 ```
@@ -415,7 +415,7 @@ For vector quantities the flow passes through `Polar` (which holds two `MessageH
 const { MessageHandler } = require('signalkutilities');
 
 const handler = new MessageHandler(app, plugin.id, 'sog');
-handler.setSubscription('navigation.speedOverGround', null, true);
+handler.configure('navigation.speedOverGround', null, true);
 handler.onChange = () => {
   app.debug('SOG =', handler.value);
 };

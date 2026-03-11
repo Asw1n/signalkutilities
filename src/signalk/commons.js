@@ -6,11 +6,13 @@ const { BaseSmoother, ExponentialSmoother, MovingAverageSmoother, KalmanSmoother
 
 // Apparent wind
 class ApparentWind extends Polar {
-  constructor( app, pluginId, source = null, passOn = true) {
-    super("apparentWind", "environment.wind.speedApparent", "environment.wind.angleApparent", source, source);
-    this.setDisplayAttributes({ label: "Observed apparent Wind", plane: "Boat" });
+  constructor(app, pluginId, source = null, passOn = true) {
+    super(app, pluginId, "apparentWind");
+    this.configureMagnitude("environment.wind.speedApparent", source, passOn);
+    this.configureAngle("environment.wind.angleApparent", source, passOn);
+    this.setMeta({ displayName: "Observed apparent Wind", plane: "Boat" });
     this.setAngleRange('-piToPi');
-    this.subscribe(app, pluginId, true, true, passOn);
+    this.subscribe(true, true);
   }
 }
 
@@ -18,7 +20,7 @@ class SmoothedApparentWind extends PolarSmoother {
   constructor(app, pluginId, source = null, passOn = true, SmootherClass = ExponentialSmoother, smootherOptions = { timeConstant: 1 }) {
     const polar = new ApparentWind(app, pluginId, source, passOn);
     super(polar.id, polar, SmootherClass, smootherOptions);
-    this.setDisplayAttributes({ label: "Smoothed apparent Wind", plane: "Boat" });
+    this.polar.setMeta({ displayName: "Smoothed apparent Wind", plane: "Boat" });
     this.setAngleRange('-piToPi');
     polar.onChange = () => { this.sample(); };
   }
@@ -27,10 +29,12 @@ class SmoothedApparentWind extends PolarSmoother {
 // ground speed
 class GroundSpeed extends Polar {
   constructor(app, pluginId, source = null, passOn = true) {
-    super("groundSpeed", "navigation.speedOverGround", "navigation.courseOverGroundTrue", source, source);
-    this.setDisplayAttributes({ label: "Observed ground Speed", plane: "Ground" });
+    super(app, pluginId, "groundSpeed");
+    this.configureMagnitude("navigation.speedOverGround", source, passOn);
+    this.configureAngle("navigation.courseOverGroundTrue", source, passOn);
+    this.setMeta({ displayName: "Observed ground Speed", plane: "Ground" });
     this.setAngleRange('0to2pi');
-    this.subscribe(app, pluginId, true, true, passOn);
+    this.subscribe(true, true);
   }
 }
 
@@ -38,7 +42,7 @@ class SmoothedGroundSpeed extends PolarSmoother {
   constructor(app, pluginId, source = null, passOn = true, SmootherClass = ExponentialSmoother, smootherOptions = { timeConstant: 1 }) {
     const polar = new GroundSpeed(app, pluginId, source, passOn);
     super(polar.id, polar, SmootherClass, smootherOptions);
-    this.setDisplayAttributes({ label: "Smoothed ground Speed", plane: "Ground" });
+    this.polar.setMeta({ displayName: "Smoothed ground Speed", plane: "Ground" });
     this.setAngleRange('0to2pi');
     polar.onChange = () => { this.sample(); };
   }
@@ -47,10 +51,12 @@ class SmoothedGroundSpeed extends PolarSmoother {
 // speed through water
 class SpeedThroughWater extends Polar {
   constructor(app, pluginId, source = null, passOn = true) {
-    super("boatSpeed", "navigation.speedThroughWater", "navigation.leewayAngle", source, source);
-    this.setDisplayAttributes({ label: "Observed speed Through Water", plane: "Boat" });
+    super(app, pluginId, "boatSpeed");
+    this.configureMagnitude("navigation.speedThroughWater", source, passOn);
+    this.configureAngle("navigation.leewayAngle", source, passOn);
+    this.setMeta({ displayName: "Observed speed Through Water", plane: "Boat" });
     this.setAngleRange('-piToPi');
-    this.subscribe(app, pluginId, true, false, passOn);
+    this.subscribe(true, false);
   }
 }
 
@@ -58,7 +64,7 @@ class SmoothedSpeedThroughWater extends PolarSmoother {
   constructor(app, pluginId, source = null, passOn = true, SmootherClass = ExponentialSmoother, smootherOptions = { timeConstant: 1 }) {
     const polar = new SpeedThroughWater(app, pluginId, source, passOn);
     super(polar.id, polar, SmootherClass, smootherOptions);
-    this.setDisplayAttributes({ label: "Smoothed speed Through Water", plane: "Boat" });
+    this.polar.setMeta({ displayName: "Smoothed speed Through Water", plane: "Boat" });
     this.setAngleRange('-piToPi');
     polar.onChange = () => { this.sample(); };
   }
@@ -67,9 +73,9 @@ class SmoothedSpeedThroughWater extends PolarSmoother {
 // attitude
 class Attitude extends MessageHandler {
   constructor(app, pluginId, source = null, passOn = true) {
-    super("attitude", "navigation.attitude", source);
-    this.setDisplayAttributes({ label: "Observed attitude" });
-    this.subscribe(app, pluginId, passOn);
+    super(app, pluginId, "attitude");
+    this.configure("navigation.attitude", source, passOn);
+    this.subscribe();
   }
 }
 
@@ -77,7 +83,6 @@ class SmoothedAttitude extends MessageSmoother {
   constructor(app, pluginId, source = null, passOn = true, SmootherClass = ExponentialSmoother, smootherOptions = { timeConstant: 1 }) {
     const handler = new Attitude(app, pluginId, source, passOn);
     super(handler.id, handler, SmootherClass, smootherOptions);
-    this.setDisplayAttributes({ label: "Smoothed attitude" });
     handler.onChange = () => { this.sample(); };
   }
 }
@@ -85,9 +90,9 @@ class SmoothedAttitude extends MessageSmoother {
 // Heading
 class Heading extends MessageHandler {
   constructor(app, pluginId, source = null, passOn = true) {
-    super("heading", "navigation.headingTrue", source);
-    this.setDisplayAttributes({ label: "Observed heading" });
-    this.subscribe(app, pluginId, passOn);
+    super(app, pluginId, "heading");
+    this.configure("navigation.headingTrue", source, passOn);
+    this.subscribe();
   }
 }
 
@@ -101,12 +106,12 @@ class Heading extends MessageHandler {
  */
 class SmoothedHeading extends PolarSmoother {
   constructor(app, pluginId, source = null, passOn = true, SmootherClass = ExponentialSmoother, smootherOptions = { timeConstant: 1 }) {
-    const polar = new Polar("heading", null, "navigation.headingTrue", source, null);
-    polar.subscribe(app, pluginId, false, true, passOn);
+    const polar = new Polar(app, pluginId, "heading");
+    polar.configureAngle("navigation.headingTrue", source, passOn);
+    polar.subscribe(false, true);
     polar.magnitudeHandler.value = 1;
-    polar.angleHandler.setDisplayAttributes({ label: "Observed heading" });
     super(polar.id, polar, SmootherClass, smootherOptions);
-    this.setDisplayAttributes({ label: "Smoothed heading", plane: "Ground" });
+    this.polar.setMeta({ displayName: "Smoothed heading", plane: "Ground" });
     this.setAngleRange('0to2pi');
     polar.onChange = () => { this.sample(); };
   }
@@ -127,7 +132,7 @@ class SmoothedHeading extends PolarSmoother {
       variance: this.variance,
       path: this.polar.angleHandler.path,
       source: this.polar.angleHandler.source,
-      displayAttributes: this.displayAttributes
+      state: this.state
     };
   }
 }
