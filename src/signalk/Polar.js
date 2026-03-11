@@ -169,6 +169,7 @@ class Polar {
    */
   get meta() {
     return {
+      id: this.id,
       ...this._polarMeta,
       angleRange: this.angleRange,
       magnitude: this.magnitudeHandler.meta,

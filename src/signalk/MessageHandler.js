@@ -613,7 +613,7 @@ class MessageHandler {
    * @returns {Object}
    */
   get state() {
-    return { stale: this.stale, frequency: this.frequency, sources: this.getSources() };
+    return { id: this.id, stale: this.stale, frequency: this.frequency, sources: this.getSources() };
   }
 
   /**
