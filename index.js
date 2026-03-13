@@ -12,7 +12,8 @@ const {
 const {
   Polar,
   PolarSmoother,
-  createSmoothedPolar
+  createSmoothedPolar,
+  SmoothedAngle
 } = require('./src/signalk/Polar');
 
 const {
@@ -21,19 +22,6 @@ const {
   ExponentialSmoother,
   KalmanSmoother
 } = require('./src/signalk/smoothers');
-
-const {
-  ApparentWind,
-  SmoothedApparentWind,
-  GroundSpeed,
-  SmoothedGroundSpeed,
-  SpeedThroughWater,
-  SmoothedSpeedThroughWater,
-  Attitude,
-  SmoothedAttitude,
-  Heading,
-  SmoothedHeading
-} = require('./src/signalk/commons');
 
 module.exports = {
   Table2D,
@@ -46,18 +34,9 @@ module.exports = {
   Polar,
   PolarSmoother,
   createSmoothedPolar,
+  SmoothedAngle,
   BaseSmoother,
   MovingAverageSmoother,
   ExponentialSmoother,
-  KalmanSmoother,
-  ApparentWind,
-  SmoothedApparentWind,
-  GroundSpeed,
-  SmoothedGroundSpeed,
-  SpeedThroughWater,
-  SmoothedSpeedThroughWater,
-  Attitude,
-  SmoothedAttitude,
-  Heading,
-  SmoothedHeading
+  KalmanSmoother
 };

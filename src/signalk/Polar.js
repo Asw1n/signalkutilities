@@ -31,8 +31,8 @@ class Polar {
     this._pluginId = pluginId;
     this._id = id;
     this._polarMeta = {};
-    this.magnitudeHandler = new MessageHandler(app, pluginId, id + "Magnitude");
-    this.angleHandler = new MessageHandler(app, pluginId, id + "Angle");
+    this.magnitudeHandler = new MessageHandler(app, pluginId, id + ".magnitude");
+    this.angleHandler = new MessageHandler(app, pluginId, id + ".angle");
   }
 
   /**
@@ -183,6 +183,7 @@ class Polar {
    */
   get state() {
     return {
+      id: this.id,
       stale: this.stale,
       magnitude: this.magnitudeHandler.state,
       angle: this.angleHandler.state,
@@ -298,8 +299,8 @@ class PolarSmoother {
    * @param {Function} SmootherClass - The smoother class to use (default: ExponentialSmoother).
    * @param {Object} [smootherOptions={}] - Options for the smoother.
    */
-  constructor(id, polar, SmootherClass = ExponentialSmoother, smootherOptions = {}) {
-    this.id = id;
+  constructor(polar, SmootherClass = ExponentialSmoother, smootherOptions = {}) {
+    this.id = polar.id + '.smoothed';
     this.polar = polar;
     this.SmootherClass = SmootherClass;
     this.smootherOptions = smootherOptions;
@@ -417,7 +418,7 @@ class PolarSmoother {
    * @returns {Object}
    */
   get meta() {
-    return { ...this.polar.meta, smoother: { type: this.SmootherClass.name, ...this.smootherOptions } };
+    return { id: this.id, ...this.polar.meta, smoother: { type: this.SmootherClass.name, ...this.smootherOptions } };
   }
 
   /**
@@ -426,7 +427,9 @@ class PolarSmoother {
    */
   get state() {
     return {
+      id: this.id,
       stale: this.stale,
+      sources: this.sources,
       magnitude: this.polar.magnitudeHandler.state,
       angle: this.polar.angleHandler.state,
     };
@@ -491,6 +494,12 @@ class PolarSmoother {
     return this.polar.stale;
   }
 
+  get sources() {
+    const mag = this.polar.magnitudeHandler.getSources();
+    const ang = this.polar.angleHandler.getSources();
+    return [...new Set([...mag, ...ang])];
+  }
+
   get trace() {
     //return Math.sqrt(this.xVariance ** 2 + this.yVariance ** 2);
     return this.xVariance + this.yVariance;
@@ -519,8 +528,111 @@ class PolarSmoother {
   }
 }
 
+/**
+ * SmoothedAngle wraps any single angular SK path and applies vector-based smoothing
+ * that correctly handles wraparound (e.g. heading crossing 0/2π or -π/+π).
+ *
+ * Internally it creates a unit-magnitude Polar so that smoothing is done in cartesian
+ * space. The public interface mirrors MessageSmoother: value, variance, path, source,
+ * report(), meta, state.
+ *
+ * @param {Object} app - The app instance.
+ * @param {string} pluginId - Plugin identifier.
+ * @param {string} id - Identifier for this smoother (e.g. "heading").
+ * @param {string} path - SK path for the angle (e.g. "navigation.headingTrue").
+ * @param {Object} [options={}]
+ * @param {string|null} [options.source=null] - Source filter.
+ * @param {boolean} [options.passOn=true] - Pass delta on to SK stream.
+ * @param {string} [options.angleRange='0to2pi'] - '0to2pi' or '-piToPi'.
+ * @param {Object} [options.meta={}] - Plugin-owned meta fields (displayName, description, plane).
+ * @param {Function} [options.SmootherClass=ExponentialSmoother] - Smoother class to use.
+ * @param {Object} [options.smootherOptions={ timeConstant: 1 }] - Options for the smoother.
+ */
+class SmoothedAngle extends PolarSmoother {
+  constructor(app, pluginId, id, path, {
+    source = null,
+    passOn = true,
+    angleRange = '0to2pi',
+    meta = {},
+    SmootherClass = ExponentialSmoother,
+    smootherOptions = { timeConstant: 1 }
+  } = {}) {
+    const polar = new Polar(app, pluginId, id);
+    polar.configureAngle(path, source, passOn);
+    polar.subscribe(false, true);
+    polar.magnitudeHandler.value = 1;
+    super(polar, SmootherClass, smootherOptions);
+    this.polar.setMeta(meta);
+    this.setAngleRange(angleRange);
+    polar.onChange = () => { this.sample(); };
+  }
 
+  /** The underlying MessageHandler — mirrors MessageSmoother.handler. */
+  get handler() {
+    return this.polar.angleHandler;
+  }
 
+  get value() {
+    return this.angle;
+  }
+
+  get variance() {
+    return this.trace;
+  }
+
+  /** Angular standard error in radians (sqrt of trace). */
+  get standardError() {
+    return Math.sqrt(this.trace);
+  }
+
+  get frequency() {
+    return this.polar.angleHandler.frequency;
+  }
+
+  get path() {
+    return this.polar.angleHandler.path;
+  }
+
+  get source() {
+    return this.polar.angleHandler.source;
+  }
+
+  getSources() {
+    return this.polar.angleHandler.getSources();
+  }
+
+  /** Flat meta — matches MessageSmoother.meta shape. */
+  get meta() {
+    return {
+      id: this.id,
+      ...this.polar.angleHandler.meta,
+      ...this.polar._polarMeta,
+      angleRange: this.angleRange,
+      smoother: { type: this.SmootherClass.name, ...this.smootherOptions }
+    };
+  }
+
+  /** Flat state — matches MessageSmoother.state shape. */
+  get state() {
+    return {
+      id: this.id,
+      stale: this.stale,
+      frequency: this.frequency,
+      sources: this.getSources()
+    };
+  }
+
+  report() {
+    return {
+      id: this.id,
+      value: this.value,
+      variance: this.variance,
+      path: this.path,
+      source: this.source,
+      state: this.state
+    };
+  }
+}
 
 /**
  * Creates a Polar and a linked PolarSmoother, wires up onChange, and sets display attributes.
@@ -549,7 +661,7 @@ function createSmoothedPolar({
   sourceAngle,
   app,
   pluginId,
-  SmootherClass = PolarSmoother,
+  SmootherClass = ExponentialSmoother,
   smootherOptions = {},
   meta = {},
   passOn = true,
@@ -562,7 +674,7 @@ function createSmoothedPolar({
   polar.setAngleRange(angleRange);
   polar.setMeta(meta);
   if (subscribe) polar.subscribe(true, true);
-  const smoother = new PolarSmoother(id, polar, SmootherClass, smootherOptions);
+  const smoother = new PolarSmoother(polar, SmootherClass, smootherOptions);
   polar.onChange = () => { smoother.sample(); };
   return smoother;
 }
@@ -571,4 +683,4 @@ function createSmoothedPolar({
 
 
 
-module.exports = { Polar, PolarSmoother, createSmoothedPolar };
+module.exports = { Polar, PolarSmoother, createSmoothedPolar, SmoothedAngle };

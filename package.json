@@ -1,10 +1,10 @@
 {
   "name": "signalkutilities",
   "version": "1.8.0",
-  "description": "utilities for signalK plugins",
+  "description": "Utilities for Signal K plugin development: message handling, polar vector maths, statistical smoothing, and web reporting",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node src/tests/Table2D.js && node src/tests/PolarTable.js"
   },
   "author": "aswin.bouwmeester@gmail.com",
   "license": "ISC",
@@ -12,13 +12,23 @@
     "type": "git",
     "url": "https://github.com/Asw1n/signalkutilities.git"
   },
+  "engines": {
+    "node": ">=18"
+  },
   "keywords": [
     "signalk",
+    "signalk-plugin",
     "utilities",
-    "plugin"
+    "polar",
+    "smoothing",
+    "kalman",
+    "exponential-smoother",
+    "navigation"
   ],
   "files": [
     "index.js",
-    "src/**"
+    "src/general/**",
+    "src/signalk/**",
+    "src/web/**"
   ]
 }

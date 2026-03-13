@@ -21,8 +21,8 @@ class MessageSmoother {
    * @param {Function} [SmootherClass=ExponentialSmoother] - The smoother class to use.
    * @param {Object} [smootherOptions={}] - Options to pass to the smoother.
    */
-  constructor(id, handler, SmootherClass = ExponentialSmoother, smootherOptions = {}) {
-    // Remove: this.id = id;
+  constructor(handler, SmootherClass = ExponentialSmoother, smootherOptions = {}) {
+    this.id = handler.id + '.smoothed';
     this.handler = handler;
     this.SmootherClass = SmootherClass;
     this.smootherOptions = smootherOptions;
@@ -38,10 +38,6 @@ class MessageSmoother {
    * Gets the handler id.
    * @returns {string}
    */
-  get id() {
-    return this.handler.id;
-  }
-
   /**
    * Resets the smoother(s) and determines the value type (scalar or object).
    * Initializes appropriate smoother(s) for the value type.
@@ -195,7 +191,7 @@ class MessageSmoother {
    * @returns {Object}
    */
   get meta() {
-    return { ...this.handler.meta, smoother: { type: this.SmootherClass.name, ...this.smootherOptions } };
+    return { id: this.id, ...this.handler.meta, smoother: { type: this.SmootherClass.name, ...this.smootherOptions } };
   }
 
   /**
@@ -203,7 +199,7 @@ class MessageSmoother {
    * @returns {Object}
    */
   get state() {
-    return this.handler.state;
+    return { id: this.id, ...this.handler.state };
   }
 
   /**
@@ -433,6 +429,34 @@ class MessageHandler {
     return MessageHandler.sendMeta(app, pluginId, [{ path, value }]);
   }
 
+  /**
+   * Overrides meta fields for a specific SK path.
+   * Merged after SK meta, so these fields take precedence when the server doesn't supply them.
+   * @param {string} path - The SK path, e.g. 'navigation.speedOverGround'.
+   * @param {Object} fields - Fields to merge, e.g. { displayUnits: 'kn' }.
+   */
+  static setMetaOverride(path, fields) {
+    MessageHandler._metaOverrides[path] = { ...(MessageHandler._metaOverrides[path] ?? {}), ...fields };
+  }
+
+  /**
+   * Injects displayUnits for multiple SK paths at once.
+   * Simulates what the SK server's unitPreferences would supply.
+   * @param {Object} prefs - Map of SK path → unit string, e.g. { 'navigation.speedOverGround': 'kn' }.
+   */
+  static setUnitPreferences(prefs) {
+    for (const [path, unit] of Object.entries(prefs)) {
+      MessageHandler.setMetaOverride(path, { displayUnits: unit });
+    }
+  }
+
+  /**
+   * Removes all injected meta overrides.
+   */
+  static clearMetaOverrides() {
+    MessageHandler._metaOverrides = {};
+  }
+
   // subscribes to a single path and source.
   subscribe() {
     const path = this._path;
@@ -602,9 +626,11 @@ class MessageHandler {
   get meta() {
     try {
       const skMeta = this._app.getSelfPath(this.path)?.meta ?? {};
-      return { id: this.id, path: this.path, source: this.source, idlePeriod: this.idlePeriod, ...skMeta };
+      const override = MessageHandler._metaOverrides[this.path] ?? {};
+      return { id: this.id, path: this.path, source: this.source, idlePeriod: this.idlePeriod, ...skMeta, ...override };
     } catch (e) {
-      return { id: this.id, path: this.path, source: this.source, idlePeriod: this.idlePeriod };
+      const override = MessageHandler._metaOverrides[this.path] ?? {};
+      return { id: this.id, path: this.path, source: this.source, idlePeriod: this.idlePeriod, ...override };
     }
   }
 
@@ -641,6 +667,7 @@ class MessageHandler {
   }
 }
 
+MessageHandler._metaOverrides = {};
 
 function createSmoothedHandler({
   id,
@@ -654,7 +681,7 @@ function createSmoothedHandler({
 }) {
   const handler = new MessageHandler(app, pluginId, id);
   handler.configure(path, source, true);
-  const smoother = new MessageSmoother(id, handler, SmootherClass, smootherOptions); // create before subscribe to avoid race
+  const smoother = new MessageSmoother(handler, SmootherClass, smootherOptions); // create before subscribe to avoid race
   if (subscribe) {
     handler.subscribe();
     handler.onChange = () => { smoother.sample(); };
