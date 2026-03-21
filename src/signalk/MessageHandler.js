@@ -292,6 +292,7 @@ class MessageHandler {
     this._sources = new Set();
     this._unsubscribes = [];      // holds unsubscribe fns pushed by subscriptionmanager
     this._deltaGate = { active: false }; // gates registered delta handlers after terminate()
+    this._restMeta = null;
   }
 
   /**
@@ -305,6 +306,8 @@ class MessageHandler {
   set path(newPath) {
     this._path = newPath;
     this._sources = new Set();
+    this._restMeta = null;
+    this._fetchRestMeta(newPath);
     if (this.subscribed ) {
       this.terminate(false);
       this.subscribe();
@@ -352,6 +355,8 @@ class MessageHandler {
     this._source = typeof source === 'string' ? source.replace(/\s+/g, "") : source;
     this._passOn = passOn;
     if (onChange !== undefined) this._onChange = onChange;
+    this._restMeta = null;
+    this._fetchRestMeta(path);
     if (this.subscribed) {
       this.terminate(false);
       this.subscribe();
@@ -427,34 +432,6 @@ class MessageHandler {
   // Convenience for a single path
   static setMeta(app, pluginId, path, value) {
     return MessageHandler.sendMeta(app, pluginId, [{ path, value }]);
-  }
-
-  /**
-   * Overrides meta fields for a specific SK path.
-   * Merged after SK meta, so these fields take precedence when the server doesn't supply them.
-   * @param {string} path - The SK path, e.g. 'navigation.speedOverGround'.
-   * @param {Object} fields - Fields to merge, e.g. { displayUnits: 'kn' }.
-   */
-  static setMetaOverride(path, fields) {
-    MessageHandler._metaOverrides[path] = { ...(MessageHandler._metaOverrides[path] ?? {}), ...fields };
-  }
-
-  /**
-   * Injects displayUnits for multiple SK paths at once.
-   * Simulates what the SK server's unitPreferences would supply.
-   * @param {Object} prefs - Map of SK path → unit string, e.g. { 'navigation.speedOverGround': 'kn' }.
-   */
-  static setUnitPreferences(prefs) {
-    for (const [path, unit] of Object.entries(prefs)) {
-      MessageHandler.setMetaOverride(path, { displayUnits: unit });
-    }
-  }
-
-  /**
-   * Removes all injected meta overrides.
-   */
-  static clearMetaOverrides() {
-    MessageHandler._metaOverrides = {};
   }
 
   // subscribes to a single path and source.
@@ -600,6 +577,28 @@ class MessageHandler {
   }
 
   /**
+   * Fetches metadata for the given path from the SK REST API and caches it.
+   * Fire-and-forget; called whenever the path changes.
+   * @private
+   */
+  _fetchRestMeta(path) {
+    if (!path) return;
+    const app = this._app;
+    const protocol = app.config?.ssl ? 'https' : 'http';
+    const port = app.config?.port ?? app.config?.settings?.port;
+    if (!port) {
+      app.debug(`MessageHandler[${this.id}]: cannot fetch REST meta — port not found in app.config`);
+      return;
+    }
+    const skPath = path.replace(/\./g, '/');
+    const url = `${protocol}://localhost:${port}/signalk/v1/api/vessels/self/${skPath}/meta`;
+    fetch(url)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data && typeof data === 'object') this._restMeta = data; })
+      .catch(err => app.debug(`MessageHandler[${this.id}]: REST meta fetch failed for ${path}: ${err.message}`));
+  }
+
+  /**
    * Updates the frequency estimate based on the latest update.
    */
   updateFrequency() {
@@ -626,11 +625,22 @@ class MessageHandler {
   get meta() {
     try {
       const skMeta = this._app.getSelfPath(this.path)?.meta ?? {};
-      const override = MessageHandler._metaOverrides[this.path] ?? {};
-      return { id: this.id, path: this.path, source: this.source, idlePeriod: this.idlePeriod, ...skMeta, ...override };
+      const restMeta = this._restMeta ?? {};
+      // REST cache is the base; getSelfPath overlays field by field.
+      // For object-valued fields (e.g. displayUnits), merge one level deeper so
+      // REST cache fills any members that getSelfPath omits due to the known bug.
+      const merged = { ...restMeta };
+      for (const [key, val] of Object.entries(skMeta)) {
+        if (val && typeof val === 'object' && !Array.isArray(val) &&
+            merged[key] && typeof merged[key] === 'object') {
+          merged[key] = { ...merged[key], ...val };
+        } else {
+          merged[key] = val;
+        }
+      }
+      return { id: this.id, path: this.path, source: this.source, idlePeriod: this.idlePeriod, ...merged };
     } catch (e) {
-      const override = MessageHandler._metaOverrides[this.path] ?? {};
-      return { id: this.id, path: this.path, source: this.source, idlePeriod: this.idlePeriod, ...override };
+      return { id: this.id, path: this.path, source: this.source, idlePeriod: this.idlePeriod, ...(this._restMeta ?? {}) };
     }
   }
 
@@ -666,8 +676,6 @@ class MessageHandler {
     };
   }
 }
-
-MessageHandler._metaOverrides = {};
 
 function createSmoothedHandler({
   id,
