@@ -80,6 +80,7 @@ class MessageSmoother {
    * @returns {MessageSmoother}
    */
   sample() {
+    if (!this.ready) return this;
     if (this.n === 0) this.reset();
     const now = Date.now();
     const handlerValue = this.handler.value;
@@ -155,6 +156,14 @@ class MessageSmoother {
    */
   get stale() {
     return this.handler.stale;
+  }
+
+  /**
+   * Returns true if the underlying handler is ready.
+   * @returns {boolean}
+   */
+  get ready() {
+    return this.handler.ready;
   }
 
   /**
@@ -650,6 +659,16 @@ class MessageHandler {
    */
   get state() {
     return { id: this.id, stale: this.stale, frequency: this.frequency, sources: this.getSources() };
+  }
+
+  /**
+   * Returns true if the handler is ready to provide a value.
+   * A handler that is not subscribed is always ready (write-only use).
+   * A subscribed handler becomes ready once the first value has been received.
+   * @returns {boolean}
+   */
+  get ready() {
+    return !this.subscribed || this.value !== null;
   }
 
   /**

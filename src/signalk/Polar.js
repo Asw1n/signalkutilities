@@ -263,6 +263,14 @@ class Polar {
     return (this.magnitudeHandler.subscribed && this.magnitudeHandler.stale) || (this.angleHandler.subscribed && this.angleHandler.stale);
   }
 
+  /**
+   * Returns true if both handlers are ready to provide values.
+   * @returns {boolean}
+   */
+  get ready() {
+    return this.magnitudeHandler.ready && this.angleHandler.ready;
+  }
+
   get trace() {
     return Math.sqrt(this.xVariance ** 2 + this.yVariance ** 2);
   }
@@ -339,6 +347,7 @@ class PolarSmoother {
    * Take a new sample from the underlying Polar object and update smoothers.
    */
   sample() {
+    if (!this.ready) return this;
     const now = Date.now();
     this.xSmoother.add(this.polar.xValue, this.polar.xVariance);
     this.ySmoother.add(this.polar.yValue, this.polar.yVariance);
@@ -492,6 +501,14 @@ class PolarSmoother {
 
   get stale() {
     return this.polar.stale;
+  }
+
+  /**
+   * Returns true if the underlying polar is ready.
+   * @returns {boolean}
+   */
+  get ready() {
+    return this.polar.ready;
   }
 
   get sources() {
