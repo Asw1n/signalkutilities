@@ -6,13 +6,14 @@ class Polar {
   static send(app, pluginId, polars) {
     let values = [];
     polars.forEach(polar => {
+      const ready = polar.ready;
       values.push({
         path: polar.pathMagnitude,
-        value: polar.magnitude
+        value: ready ? polar.magnitude : null
       });
       values.push({
         path: polar.pathAngle,
-        value: polar.angle
+        value: ready ? polar.angle : null
       });
     });
     const message = {
@@ -31,6 +32,7 @@ class Polar {
     this._pluginId = pluginId;
     this._id = id;
     this._polarMeta = {};
+    this._ready = false;
     this.magnitudeHandler = new MessageHandler(app, pluginId, id + ".magnitude");
     this.angleHandler = new MessageHandler(app, pluginId, id + ".angle");
   }
@@ -81,6 +83,7 @@ class Polar {
     this.yValue = this.magnitudeHandler.value * Math.sin(this.angleHandler.value);
     this.xVariance = 0;
     this.yVariance = 0;
+    this._ready = this.magnitudeHandler.ready && this.angleHandler.ready;
     if (typeof this.onChange === 'function') {
       this.onChange();
     }
@@ -91,6 +94,7 @@ class Polar {
     this.yValue = polar.y;
     this.xVariance = polar.xVariance;
     this.yVariance = polar.yVariance;
+    this._ready = true;
   }
 
   substract(polar) {
@@ -134,6 +138,7 @@ class Polar {
     this.yValue = value.magnitude * Math.sin(value.angle);
     this.xVariance = 0;
     this.yVariance = 0;
+    this._ready = true;
   }
 
   setVectorValue(value= { x: 0, y: 0 }, variance = { x: 0, y: 0 }) {
@@ -141,6 +146,7 @@ class Polar {
     this.yValue = value.y;
     this.xVariance = variance.x;
     this.yVariance = variance.y;
+    this._ready = true;
   }
 
   setMeta(obj) {
@@ -184,6 +190,7 @@ class Polar {
   get state() {
     return {
       id: this.id,
+      ready: this.ready,
       stale: this.stale,
       magnitude: this.magnitudeHandler.state,
       angle: this.angleHandler.state,
@@ -263,6 +270,28 @@ class Polar {
     return (this.magnitudeHandler.subscribed && this.magnitudeHandler.stale) || (this.angleHandler.subscribed && this.angleHandler.stale);
   }
 
+  /**
+   * Marks this polar as having no valid value. Downstream consumers that check
+   * ready will treat it as unavailable until a successful value write occurs.
+   * @returns {this}
+   */
+  invalidate() {
+    this._ready = false;
+    return this;
+  }
+
+  /**
+   * Returns true when this polar holds a currently valid value.
+   * For subscribed polars this is set by incoming SK data and cleared on staleness.
+   * For derived polars this is set by the calculation code via value-writing methods
+   * and cleared by invalidate().
+   * @returns {boolean}
+   */
+  get ready() {
+    if (this.stale) return false;
+    return this._ready;
+  }
+
   get trace() {
     return Math.sqrt(this.xVariance ** 2 + this.yVariance ** 2);
   }
@@ -309,8 +338,10 @@ class PolarSmoother {
     this.timestamp = null;
     this.n = 0;
     this.angleRange = '-piToPi';
-    this.onChange = null; // Add onChange property
-    //this.reset();
+    this.onChange = null;
+    this._stale = true;
+    this._idleTimer = null;
+    this.idlePeriod = this._derivedIdlePeriod(smootherOptions);
   }
 
   /**
@@ -320,18 +351,27 @@ class PolarSmoother {
   reset(xValue = null, yValue = null, xVariance = null, yVariance = null) {
     this.xSmoother.reset(xValue, xVariance);
     this.ySmoother.reset(yValue, yVariance);
-    // Optionally, initialize with current values
-    // if (typeof this.polar.xValue === 'number') {
-    //   this.xSmoother.add(this.polar.xValue);
-    // }
-    // if (typeof this.polar.yValue === 'number') {
-    //   this.ySmoother.add(this.polar.yValue);
-    // }
     this.timestamp = null;
     this.n = 0;
   }
 
+  _derivedIdlePeriod(opts) {
+    if (typeof opts.timeConstant === 'number') return opts.timeConstant * 3000;
+    if (typeof opts.timeSpan === 'number') return opts.timeSpan * 3000;
+    return 4000;
+  }
+
+  _resetIdleTimer() {
+    if (this._idleTimer) clearTimeout(this._idleTimer);
+    this._stale = false;
+    this._idleTimer = setTimeout(() => { this._stale = true; }, this.idlePeriod);
+  }
+
   terminate() {
+    if (this._idleTimer) {
+      clearTimeout(this._idleTimer);
+      this._idleTimer = null;
+    }
     return this.polar.terminate();
   }
 
@@ -339,11 +379,14 @@ class PolarSmoother {
    * Take a new sample from the underlying Polar object and update smoothers.
    */
   sample() {
+    if (!this.polar.ready) return this;
+    if (this._stale) this.reset();
     const now = Date.now();
     this.xSmoother.add(this.polar.xValue, this.polar.xVariance);
     this.ySmoother.add(this.polar.yValue, this.polar.yVariance);
     this.timestamp = now;
     this.n++;
+    this._resetIdleTimer();
     if (typeof this.onChange === 'function') {
       this.onChange();
     }
@@ -391,13 +434,14 @@ class PolarSmoother {
   static send(app, pluginId, polarsSmoothed) {
     let values = [];
     polarsSmoothed.forEach(ps => {
+      const ready = ps.ready;
       values.push({
         path: ps.polar.pathMagnitude,
-        value: ps.magnitude
+        value: ready ? ps.magnitude : null
       });
       values.push({
         path: ps.polar.pathAngle,
-        value: ps.angle
+        value: ready ? ps.angle : null
       });
     });
     const message = {
@@ -428,6 +472,7 @@ class PolarSmoother {
   get state() {
     return {
       id: this.id,
+      ready: this.ready,
       stale: this.stale,
       sources: this.sources,
       magnitude: this.polar.magnitudeHandler.state,
@@ -491,7 +536,16 @@ class PolarSmoother {
   }
 
   get stale() {
-    return this.polar.stale;
+    return this._stale;
+  }
+
+  /**
+   * Returns true if the smoother has received at least one sample and is not stale.
+   * Stale is determined by the smoother's own idle timer, not the source's state.
+   * @returns {boolean}
+   */
+  get ready() {
+    return !this._stale;
   }
 
   get sources() {
@@ -616,6 +670,7 @@ class SmoothedAngle extends PolarSmoother {
   get state() {
     return {
       id: this.id,
+      ready: this.ready,
       stale: this.stale,
       frequency: this.frequency,
       sources: this.getSources()

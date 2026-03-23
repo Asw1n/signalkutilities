@@ -31,7 +31,10 @@ class MessageSmoother {
     this.n = 0;
     this._isObject = false;
     this._propertyKeys = null;
-    this.onChange = null; // Add onChange property
+    this.onChange = null;
+    this._stale = true;
+    this._idleTimer = null;
+    this.idlePeriod = this._derivedIdlePeriod(smootherOptions);
   }
 
   /**
@@ -68,11 +71,27 @@ class MessageSmoother {
   }
 
   /**
-   * Terminates the underlying handler.
+   * Terminates the underlying handler and clears the idle timer.
    * @returns {null}
    */
   terminate(clearCallback = true) {
+    if (this._idleTimer) {
+      clearTimeout(this._idleTimer);
+      this._idleTimer = null;
+    }
     return this.handler.terminate(clearCallback);
+  }
+
+  _derivedIdlePeriod(opts) {
+    if (typeof opts.timeConstant === 'number') return opts.timeConstant * 3000;
+    if (typeof opts.timeSpan === 'number') return opts.timeSpan * 3000;
+    return 4000;
+  }
+
+  _resetIdleTimer() {
+    if (this._idleTimer) clearTimeout(this._idleTimer);
+    this._stale = false;
+    this._idleTimer = setTimeout(() => { this._stale = true; }, this.idlePeriod);
   }
 
   /**
@@ -80,7 +99,12 @@ class MessageSmoother {
    * @returns {MessageSmoother}
    */
   sample() {
-    if (this.n === 0) this.reset();
+    if (!this.handler.ready) return this;
+    if (this._stale) {
+      this.reset();
+    } else if (this.n === 0) {
+      this.reset();
+    }
     const now = Date.now();
     const handlerValue = this.handler.value;
     const handlerVariance = this.handler.variance;
@@ -96,6 +120,7 @@ class MessageSmoother {
     }
     this.timestamp = now;
     this.n++;
+    this._resetIdleTimer();
     if (typeof this.onChange === 'function') {
       this.onChange();
     }
@@ -154,7 +179,16 @@ class MessageSmoother {
    * @returns {boolean}
    */
   get stale() {
-    return this.handler.stale;
+    return this._stale;
+  }
+
+  /**
+   * Returns true if the smoother has received at least one sample and is not stale.
+   * Stale is determined by the smoother's own idle timer, not the source's state.
+   * @returns {boolean}
+   */
+  get ready() {
+    return !this._stale;
   }
 
   /**
@@ -199,7 +233,7 @@ class MessageSmoother {
    * @returns {Object}
    */
   get state() {
-    return { id: this.id, ...this.handler.state };
+    return { id: this.id, ready: this.ready, ...this.handler.state };
   }
 
   /**
@@ -275,8 +309,9 @@ class MessageHandler {
     this._app = app;
     this._id = id;
     this._pluginId = pluginId;
- 
-    this.value = null;
+
+    this._value = null;
+    this._ready = false;
     this.timestamp = null;
     this.frequency = null;
     this.freqAlpha = 0.2;
@@ -301,6 +336,26 @@ class MessageHandler {
    */
   get id() {
     return this._id;
+  }
+
+  get value() {
+    return this._value;
+  }
+
+  set value(v) {
+    this._value = v;
+    this._ready = true;
+  }
+
+  /**
+   * Marks this handler as having no valid value.
+   * Downstream consumers that check ready will treat it as unavailable
+   * until a successful value write occurs.
+   * @returns {this}
+   */
+  invalidate() {
+    this._ready = false;
+    return this;
   }
 
   set path(newPath) {
@@ -487,7 +542,8 @@ class MessageHandler {
             if (Array.isArray(update?.values)) {
               for (const entry of update.values) {
                 if (path === entry.path) {
-                  this.value = entry.value;
+                  this._value = entry.value;
+                  this._ready = true;
                   this.updateFrequency();
                   found = true;
                   if (updateSource) this._sources.add(updateSource);
@@ -538,7 +594,8 @@ class MessageHandler {
           if (Array.isArray(update?.values)) {
             for (let i = update.values.length - 1; i >= 0; i--) {
               if (path === update.values[i].path) {
-                this.value = update.values[i].value;
+                this._value = update.values[i].value;
+                this._ready = true;
                 this.updateFrequency();
                 found = true;
                 if (updateSource) this._sources.add(updateSource);
@@ -649,7 +706,17 @@ class MessageHandler {
    * @returns {Object}
    */
   get state() {
-    return { id: this.id, stale: this.stale, frequency: this.frequency, sources: this.getSources() };
+    return { id: this.id, ready: this.ready, stale: this.stale, frequency: this.frequency, sources: this.getSources() };
+  }
+
+  /**
+   * Returns true when this handler holds a currently valid value.
+   * For subscribed handlers this is set by incoming SK data and cleared on staleness.
+   * For write-only/derived handlers this is set by assignment to value and cleared by invalidate().
+   * @returns {boolean}
+   */
+  get ready() {
+    return !this.stale && this._ready;
   }
 
   /**

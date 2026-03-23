@@ -4,6 +4,16 @@ These instructions describe the changes required in a **Signal K plugin** and it
 
 ---
 
+## Design Principle: meta vs state
+
+**`meta`** — static, configuration-time properties that do not change at runtime (path, source, units, displayName, smoother type, idlePeriod, etc.).
+
+**`state`** — dynamic, runtime properties that change as the system operates (ready, stale, frequency, sources, etc.).
+
+When implementing or reviewing code, flag any property that can change at runtime if it appears in `meta`, and any property that is fixed at configuration time if it appears in `state`. These are design errors and should be corrected before implementing.
+
+---
+
 ## Background: What Changed in the Library
 
 ### Removed from all classes
@@ -17,10 +27,10 @@ These instructions describe the changes required in a **Signal K plugin** and it
 
 | Class | `get meta()` | `get state()` |
 |---|---|---|
-| `MessageHandler` | `{ id, path, source, idlePeriod, ...skMeta }` — SK fields lazily read | `{ stale, frequency, sources }` |
-| `MessageSmoother` | `{ ...handler.meta, smoother: { type, ...smootherOptions } }` | delegates to `handler.state` |
-| `Polar` | `{ ..._polarMeta, angleRange, magnitude: handler.meta, angle: handler.meta }` | `{ stale, magnitude: handler.state, angle: handler.state }` |
-| `PolarSmoother` | `{ ...polar.meta, smoother: { type, ...smootherOptions } }` | `{ stale, magnitude: handler.state, angle: handler.state }` |
+| `MessageHandler` | `{ id, path, source, idlePeriod, ...skMeta }` — SK fields lazily read | `{ ready, stale, frequency, sources }` |
+| `MessageSmoother` | `{ ...handler.meta, smoother: { type, ...smootherOptions } }` | `{ ready, ...handler.state }` |
+| `Polar` | `{ ..._polarMeta, angleRange, magnitude: handler.meta, angle: handler.meta }` | `{ ready, stale, magnitude: handler.state, angle: handler.state }` |
+| `PolarSmoother` | `{ ...polar.meta, smoother: { type, ...smootherOptions } }` | `{ ready, stale, magnitude: handler.state, angle: handler.state }` |
 
 ### `report()` field changes
 
