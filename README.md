@@ -63,21 +63,6 @@ handler.report();    // { id, value, path, source, state }
 handler.terminate(); // unsubscribe
 ```
 
-### Injecting meta overrides (for testing without a live SK server)
-
-```js
-MessageHandler.setUnitPreferences({
-  boatSpeed: 'kn',
-  heading: 'deg'
-});
-
-// Fine-grained:
-MessageHandler.setMetaOverride('boatSpeed', { displayName: 'SOG', displayUnits: 'kn' });
-
-// Clear all overrides:
-MessageHandler.clearMetaOverrides();
-```
-
 ---
 
 ## MessageSmoother
@@ -85,14 +70,13 @@ MessageHandler.clearMetaOverrides();
 Wraps a `MessageHandler` and applies statistical smoothing to scalar values.
 
 ```js
-const { MessageSmoother, ExponentialSmoother } = require('signalkutilities');
+const { MessageHandler, MessageSmoother, ExponentialSmoother } = require('signalkutilities');
 
-const smoother = new MessageSmoother(app, pluginId, 'boatSpeed', {
-  SmootherClass: ExponentialSmoother,
-  smootherOptions: { timeConstant: 2 }
-});
-smoother.configure('navigation.speedOverGround', null, true);
-smoother.subscribe();
+const handler = new MessageHandler(app, pluginId, 'boatSpeed');
+handler.configure('navigation.speedOverGround', null, true);
+const smoother = new MessageSmoother(handler, ExponentialSmoother, { timeConstant: 2 });
+handler.subscribe();
+handler.onChange = () => smoother.sample();
 
 smoother.value;          // smoothed value
 smoother.standardError;  // sqrt of variance
