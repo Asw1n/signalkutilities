@@ -25,7 +25,7 @@ class Polar {
           values: values
         }]
     };
-    app.handleMessage(pluginId, message);
+     if (values.length > 0) app.handleMessage(pluginId, message);
   }
 
   constructor(app, pluginId, id) {
@@ -449,7 +449,6 @@ class PolarSmoother {
         value: ps.angle 
       });
     }
-    else {app.debug(`PolarSmoother ${ps.id} is not ready, values not sent.`);}
     });
     const message = {
       context: 'vessels.self',
@@ -460,7 +459,7 @@ class PolarSmoother {
         }
       ]
     };
-    app.handleMessage(pluginId, message);
+    if (values.length > 0) app.handleMessage(pluginId, message);
   }
 
   /**
