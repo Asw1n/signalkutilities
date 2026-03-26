@@ -471,7 +471,7 @@ class MessageHandler {
           values: values
         }]
     };
-    app.handleMessage(pluginId, message);
+    if (values.length > 0) app.handleMessage(pluginId, message);
   }
 
   // Send meta updates for one or more paths
@@ -546,15 +546,17 @@ class MessageHandler {
           const isOwnSource = update?.source?.label === pluginId ||
             updateSource === pluginId ||
             (typeof updateSource === 'string' && updateSource.startsWith(pluginId + '.'));
-          if (!isOwnSource && (!label || updateSource === label)) {
+          if (!isOwnSource) {
             if (Array.isArray(update?.values)) {
               for (const entry of update.values) {
                 if (path === entry.path) {
-                  this._value = entry.value;
-                  this._ready = true;
-                  this.updateFrequency();
-                  found = true;
                   if (updateSource) this._sources.add(updateSource);
+                  if (!label || updateSource === label) {
+                    this._value = entry.value;
+                    this._ready = true;
+                    this.updateFrequency();
+                    found = true;
+                  }
                 }
               }
             }
@@ -598,16 +600,18 @@ class MessageHandler {
         const isOwnSource = update?.source?.label === pluginId ||
           updateSource === pluginId ||
           (typeof updateSource === 'string' && updateSource.startsWith(pluginId + '.'));
-        if (!isOwnSource && (!label || updateSource === label)) {
+        if (!isOwnSource) {
           if (Array.isArray(update?.values)) {
             for (let i = update.values.length - 1; i >= 0; i--) {
               if (path === update.values[i].path) {
-                this._value = update.values[i].value;
-                this._ready = true;
-                this.updateFrequency();
-                found = true;
                 if (updateSource) this._sources.add(updateSource);
-                update.values.splice(i, 1);
+                if (!label || updateSource === label) {
+                  this._value = update.values[i].value;
+                  this._ready = true;
+                  this.updateFrequency();
+                  found = true;
+                  update.values.splice(i, 1);
+                }
               }
             }
           }
