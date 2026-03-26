@@ -6,15 +6,16 @@ class Polar {
   static send(app, pluginId, polars) {
     let values = [];
     polars.forEach(polar => {
-      const ready = polar.ready;
+      if (polar.ready) {
       values.push({
         path: polar.pathMagnitude,
-        value: ready ? polar.magnitude : null
+        value: polar.magnitude 
       });
       values.push({
         path: polar.pathAngle,
-        value: ready ? polar.angle : null
+        value: polar.angle 
       });
+    }
     });
     const message = {
       context: 'vessels.self',
@@ -356,9 +357,13 @@ class PolarSmoother {
   }
 
   _derivedIdlePeriod(opts) {
-    if (typeof opts.timeConstant === 'number') return opts.timeConstant * 3000;
-    if (typeof opts.timeSpan === 'number') return opts.timeSpan * 3000;
-    return 4000;
+    const MIN_IDLE = 5000;
+    if (typeof opts.timeConstant === 'number') return Math.max(opts.timeConstant * 3000, MIN_IDLE);
+    if (typeof opts.tau === 'number') return Math.max(opts.tau * 3000, MIN_IDLE);
+    if (typeof opts.timeSpan === 'number') return Math.max(opts.timeSpan * 3000, MIN_IDLE);
+    // KalmanSmoother (processVariance/measurementVariance/steadyState) has no
+    // time-based parameter — use a sensible default.
+    return 10000;
   }
 
   _resetIdleTimer() {
@@ -434,15 +439,17 @@ class PolarSmoother {
   static send(app, pluginId, polarsSmoothed) {
     let values = [];
     polarsSmoothed.forEach(ps => {
-      const ready = ps.ready;
+      if(ps.ready) {
       values.push({
         path: ps.polar.pathMagnitude,
-        value: ready ? ps.magnitude : null
+        value: ps.magnitude 
       });
       values.push({
         path: ps.polar.pathAngle,
-        value: ready ? ps.angle : null
+        value: ps.angle 
       });
+    }
+    else {app.debug(`PolarSmoother ${ps.id} is not ready, values not sent.`);}
     });
     const message = {
       context: 'vessels.self',

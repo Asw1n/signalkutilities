@@ -83,9 +83,13 @@ class MessageSmoother {
   }
 
   _derivedIdlePeriod(opts) {
-    if (typeof opts.timeConstant === 'number') return opts.timeConstant * 3000;
-    if (typeof opts.timeSpan === 'number') return opts.timeSpan * 3000;
-    return 4000;
+    const MIN_IDLE = 5000;
+    if (typeof opts.timeConstant === 'number') return Math.max(opts.timeConstant * 3000, MIN_IDLE);
+    if (typeof opts.tau === 'number') return Math.max(opts.tau * 3000, MIN_IDLE);
+    if (typeof opts.timeSpan === 'number') return Math.max(opts.timeSpan * 3000, MIN_IDLE);
+    // KalmanSmoother (processVariance/measurementVariance/steadyState) has no
+    // time-based parameter — use a sensible default.
+    return 10000;
   }
 
   _resetIdleTimer() {
@@ -450,10 +454,14 @@ class MessageHandler {
   static send(app, pluginId, messages) {
     let values = [];
     messages.forEach(delta => {
-      values.push({
-        path: delta._path,
-        value: delta.value
-      });
+
+      if (delta.ready) {
+        values.push({
+          path: delta._path,
+          value: delta.value
+        });
+      }
+
     });
     const message = {
       context: 'vessels.self',
@@ -713,6 +721,8 @@ class MessageHandler {
    * Returns true when this handler holds a currently valid value.
    * For subscribed handlers this is set by incoming SK data and cleared on staleness.
    * For write-only/derived handlers this is set by assignment to value and cleared by invalidate().
+   * A handler with no path and no subscription is a constant/placeholder contributor
+   * (e.g. a fixed angle of 0 when only magnitude is used) and is always ready.
    * @returns {boolean}
    */
   get ready() {
