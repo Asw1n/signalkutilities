@@ -1,6 +1,9 @@
 const { MessageHandler } = require('./MessageHandler');
 const { MovingAverageSmoother, ExponentialSmoother, KalmanSmoother } = require('./smoothers');
 
+// Set to true to enable staleness detection (idle timers). Set to false to disable for debugging.
+const STALENESS_DETECTION = false;
+
 
 class Polar {
   static send(app, pluginId, polars) {
@@ -367,6 +370,7 @@ class PolarSmoother {
   }
 
   _resetIdleTimer() {
+    if (!STALENESS_DETECTION) return;
     if (this._idleTimer) clearTimeout(this._idleTimer);
     this._stale = false;
     this._idleTimer = setTimeout(() => { this._stale = true; }, this.idlePeriod);
@@ -542,6 +546,7 @@ class PolarSmoother {
   }
 
   get stale() {
+    if (!STALENESS_DETECTION) return false;
     return this._stale;
   }
 
@@ -551,7 +556,7 @@ class PolarSmoother {
    * @returns {boolean}
    */
   get ready() {
-    return !this._stale;
+    return !this.stale;
   }
 
   get sources() {

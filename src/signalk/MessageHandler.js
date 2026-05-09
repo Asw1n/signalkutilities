@@ -1,5 +1,8 @@
 // Statistical smoothing and variance tracking for MessageHandler values, using Smoother classes
 
+// Set to true to enable staleness detection (idle timers). Set to false to disable for debugging.
+const STALENESS_DETECTION = false;
+
 const { MovingAverageSmoother, ExponentialSmoother, KalmanSmoother } = require('./smoothers');
 
 /**
@@ -93,6 +96,7 @@ class MessageSmoother {
   }
 
   _resetIdleTimer() {
+    if (!STALENESS_DETECTION) return;
     if (this._idleTimer) clearTimeout(this._idleTimer);
     this._stale = false;
     this._idleTimer = setTimeout(() => { this._stale = true; }, this.idlePeriod);
@@ -183,6 +187,7 @@ class MessageSmoother {
    * @returns {boolean}
    */
   get stale() {
+    if (!STALENESS_DETECTION) return false;
     return this._stale;
   }
 
@@ -192,7 +197,7 @@ class MessageSmoother {
    * @returns {boolean}
    */
   get ready() {
-    return !this._stale;
+    return !this.stale;
   }
 
   /**
@@ -632,6 +637,7 @@ class MessageHandler {
    * @private
     */
   _resetIdleTimer() {
+    if (!STALENESS_DETECTION) return;
     if (this._idleTimer) {
       clearTimeout(this._idleTimer);
       if (this.stale) {
@@ -654,11 +660,7 @@ class MessageHandler {
     if (!path) return;
     const app = this._app;
     const protocol = app.config?.ssl ? 'https' : 'http';
-    const port = app.config?.port ?? app.config?.settings?.port;
-    if (!port) {
-      app.debug(`MessageHandler[${this.id}]: cannot fetch REST meta — port not found in app.config`);
-      return;
-    }
+    const port = app.config?.port ?? app.config?.settings?.port ?? 3000;
     const skPath = path.replace(/\./g, '/');
     const url = `${protocol}://localhost:${port}/signalk/v1/api/vessels/self/${skPath}/meta`;
     fetch(url)
