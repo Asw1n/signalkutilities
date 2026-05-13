@@ -54,7 +54,7 @@ class Table2D {
   }
 
   static fromJSON(data, ClassType) {
-    const table = new Table2D(data.id, data.row, data.col, ClassType, data.parameters); // FIX: include id and correct order
+    const table = new Table2D(data.id, data.row, data.col, ClassType, data.parameters);
     table.table = data.table.map(row => row.map(cellData => ClassType.fromJSON(cellData)));
     return table;
   }

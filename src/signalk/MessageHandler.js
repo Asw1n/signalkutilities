@@ -321,36 +321,12 @@ class MessageSmoother {
  * @class
  */
 class MessageHandler {
-  /* Old constructor
-  constructor(id, path, source) {
-    this.id = id;
-    this._path = path;
-    this._source = typeof source === 'string' ? source.replace(/\s+/g, "") : source;
-
-    this.value = null;
-    this.timestamp = null;
-    this.frequency = null;
-    this.freqAlpha = 0.2;
-    this.onChange = null;
-    this._displayAttributes = {};
-    this.subscribed = false;
-    this.n = 0;
-    this._onIdle = null;
-    this.idlePeriod = 4000; // ms
-    this._idleTimer = null;
-    this.stale = false;
-    this._passOn = true;
-    this._app = null;
-    this._pluginId = null;
-  }
-    */
-
   /**
    * Constructs the messagehandler.
    * @param {Object} app - The app instance.
    * @param {string} pluginId - Plugin identifier.
    * @param {string} id - Identifier for this handler.
-    */
+   */
 
   constructor(app, pluginId, id) {
 

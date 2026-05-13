@@ -183,8 +183,8 @@ Three smoother classes are available. All implement the same interface: `add(val
 | Class | Options | Use case |
 |---|---|---|
 | `ExponentialSmoother` | `timeConstant` (seconds) | General purpose, low lag |
-| `MovingAverageSmoother` | `windowSize` (samples) | Simple rolling average |
-| `KalmanSmoother` | `processNoise`, `measurementNoise` | Optimal when noise is known |
+| `MovingAverageSmoother` | `timeSpan` (seconds) | Simple rolling average |
+| `KalmanSmoother` | `processVariance`, `measurementVariance`, `steadyState` | Optimal when noise is known |
 
 ```js
 const { ExponentialSmoother, KalmanSmoother, MovingAverageSmoother } = require('signalkutilities');

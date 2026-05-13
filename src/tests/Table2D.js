@@ -38,7 +38,7 @@ const col = { min: -24, max: 24, step: 8 };
 
 const ClassName = Mean;
 const param = null;;
-const table = new Table2D(row, col, ClassName, param);
+const table = new Table2D('testTable', row, col, ClassName, param);
 console.log(table.getCell(0, 0).toJSON());
 table.getCell(0, 0).addObs(4);
 table.getCell(0, 0).addObs(2);
