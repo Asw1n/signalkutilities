@@ -34,6 +34,8 @@ class Polar {
     this._id = id;
     this._polarMeta = {};
     this._ready = false;
+    this._magnitudeThreshold = null;
+    this._usingFallbackAngle = false;
     this.magnitudeHandler = new MessageHandler(app, pluginId, id + ".magnitude");
     this.angleHandler = new MessageHandler(app, pluginId, id + ".angle");
   }
@@ -52,6 +54,20 @@ class Polar {
 
   configureMagnitude(pathMagnitude, sourceMagnitude, passOn = true) {
     this.magnitudeHandler.configure(pathMagnitude, sourceMagnitude, passOn);
+  }
+
+  /**
+   * Enables fallback angle (0) when magnitude is at or below the given threshold.
+   * When active, the polar becomes ready based on magnitude alone.
+   * Set threshold to null to disable.
+   * @param {number|null} threshold
+   */
+  configureFallbackAngle(threshold) {
+    this._magnitudeThreshold = threshold;
+  }
+
+  get angleFallbackActive() {
+    return this._usingFallbackAngle;
   }
 
   subscribe(toMagnitude = true, toAngle = true) {
@@ -80,11 +96,16 @@ class Polar {
   }
 
   processChanges() {
-    this.xValue = this.magnitudeHandler.value * Math.cos(this.angleHandler.value);
-    this.yValue = this.magnitudeHandler.value * Math.sin(this.angleHandler.value);
+    const belowThreshold = this._magnitudeThreshold !== null &&
+      this.magnitudeHandler.ready &&
+      Math.abs(this.magnitudeHandler.value) <= this._magnitudeThreshold;
+    this._usingFallbackAngle = belowThreshold;
+    const angleValue = belowThreshold ? 0 : this.angleHandler.value;
+    this.xValue = this.magnitudeHandler.value * Math.cos(angleValue);
+    this.yValue = this.magnitudeHandler.value * Math.sin(angleValue);
     this.xVariance = 0;
     this.yVariance = 0;
-    this._ready = this.magnitudeHandler.ready && this.angleHandler.ready;
+    this._ready = this.magnitudeHandler.ready && (belowThreshold || this.angleHandler.ready);
     if (typeof this.onChange === 'function') {
       this.onChange();
     }
@@ -201,6 +222,7 @@ class Polar {
       pathKnown: this.magnitudeHandler._restMeta !== null && this.angleHandler._restMeta !== null,
       subscribed: this.magnitudeHandler.subscribed && this.angleHandler.subscribed,
       stalenessDetection: this.stalenessDetection,
+      angleFallbackActive: this._usingFallbackAngle,
       lastDelta,
       deltaAge: oldestDelta ? Date.now() - oldestDelta : null,
       frequency: this.frequency,
@@ -776,7 +798,8 @@ function createSmoothedPolar({
   smootherOptions = {},
   meta = {},
   passOn = true,
-  angleRange = '-piToPi'
+  angleRange = '-piToPi',
+  magnitudeThreshold = 0.1
 }) {
 
   const polar = new Polar(app, pluginId, id);
@@ -784,6 +807,7 @@ function createSmoothedPolar({
   polar.configureAngle(pathAngle, sourceAngle, passOn);
   polar.setAngleRange(angleRange);
   polar.setMeta(meta);
+  if (magnitudeThreshold !== null) polar.configureFallbackAngle(magnitudeThreshold);
   if (subscribe) polar.subscribe(true, true);
   const smoother = new PolarSmoother(polar, SmootherClass, smootherOptions);
   polar.onChange = () => { smoother.sample(); };
