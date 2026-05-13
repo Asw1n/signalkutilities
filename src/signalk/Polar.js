@@ -1,9 +1,6 @@
 const { MessageHandler } = require('./MessageHandler');
 const { MovingAverageSmoother, ExponentialSmoother, KalmanSmoother } = require('./smoothers');
 
-// Set to true to enable staleness detection (idle timers). Set to false to disable for debugging.
-const STALENESS_DETECTION = false;
-
 
 class Polar {
   static send(app, pluginId, polars) {
@@ -270,6 +267,15 @@ class Polar {
     return null;
   }
 
+  get stalenessDetection() {
+    return this.magnitudeHandler.stalenessDetection && this.angleHandler.stalenessDetection;
+  }
+
+  set stalenessDetection(val) {
+    this.magnitudeHandler.stalenessDetection = val;
+    this.angleHandler.stalenessDetection = val;
+  }
+
   get stale() {
     return (this.magnitudeHandler.subscribed && this.magnitudeHandler.stale) || (this.angleHandler.subscribed && this.angleHandler.stale);
   }
@@ -346,6 +352,7 @@ class PolarSmoother {
     this._stale = true;
     this._idleTimer = null;
     this.idlePeriod = this._derivedIdlePeriod(smootherOptions);
+    this._stalenessDetection = true;
   }
 
   /**
@@ -370,7 +377,7 @@ class PolarSmoother {
   }
 
   _resetIdleTimer() {
-    if (!STALENESS_DETECTION) return;
+    if (!this._stalenessDetection) return;
     if (this._idleTimer) clearTimeout(this._idleTimer);
     this._stale = false;
     this._idleTimer = setTimeout(() => { this._stale = true; }, this.idlePeriod);
@@ -545,9 +552,22 @@ class PolarSmoother {
     return this.n;
   }
 
+  get stalenessDetection() {
+    return this._stalenessDetection;
+  }
+
+  set stalenessDetection(val) {
+    this._stalenessDetection = val;
+    this.polar.stalenessDetection = val;
+    if (!val && this._idleTimer) {
+      clearTimeout(this._idleTimer);
+      this._idleTimer = null;
+    }
+    if (!val) this._stale = false;
+  }
+
   get stale() {
-    if (!STALENESS_DETECTION) return false;
-    return this._stale;
+    return this._stalenessDetection ? this._stale : false;
   }
 
   /**
@@ -556,7 +576,7 @@ class PolarSmoother {
    * @returns {boolean}
    */
   get ready() {
-    return !this.stale;
+    return this.n > 0 && !this.stale;
   }
 
   get sources() {

@@ -1,8 +1,5 @@
 // Statistical smoothing and variance tracking for MessageHandler values, using Smoother classes
 
-// Set to true to enable staleness detection (idle timers). Set to false to disable for debugging.
-const STALENESS_DETECTION = false;
-
 const { MovingAverageSmoother, ExponentialSmoother, KalmanSmoother } = require('./smoothers');
 
 /**
@@ -38,6 +35,7 @@ class MessageSmoother {
     this._stale = true;
     this._idleTimer = null;
     this.idlePeriod = this._derivedIdlePeriod(smootherOptions);
+    this._stalenessDetection = true;
   }
 
   /**
@@ -95,8 +93,22 @@ class MessageSmoother {
     return 10000;
   }
 
+  get stalenessDetection() {
+    return this._stalenessDetection;
+  }
+
+  set stalenessDetection(val) {
+    this._stalenessDetection = val;
+    this.handler.stalenessDetection = val;
+    if (!val && this._idleTimer) {
+      clearTimeout(this._idleTimer);
+      this._idleTimer = null;
+    }
+    if (!val) this._stale = false;
+  }
+
   _resetIdleTimer() {
-    if (!STALENESS_DETECTION) return;
+    if (!this._stalenessDetection) return;
     if (this._idleTimer) clearTimeout(this._idleTimer);
     this._stale = false;
     this._idleTimer = setTimeout(() => { this._stale = true; }, this.idlePeriod);
@@ -187,8 +199,7 @@ class MessageSmoother {
    * @returns {boolean}
    */
   get stale() {
-    if (!STALENESS_DETECTION) return false;
-    return this._stale;
+    return this._stalenessDetection ? this._stale : false;
   }
 
   /**
@@ -197,7 +208,7 @@ class MessageSmoother {
    * @returns {boolean}
    */
   get ready() {
-    return !this.stale;
+    return this.n > 0 && !this.stale;
   }
 
   /**
@@ -329,7 +340,6 @@ class MessageHandler {
     this.n = 0;
     this.idlePeriod = 4000; // ms
     this._idleTimer = null;
-    this.stale = false;
     this._passOn = true;
     this._path="";
     this._source="";
@@ -337,6 +347,8 @@ class MessageHandler {
     this._unsubscribes = [];      // holds unsubscribe fns pushed by subscriptionmanager
     this._deltaGate = { active: false }; // gates registered delta handlers after terminate()
     this._restMeta = null;
+    this._stale = false;
+    this._stalenessDetection = true;
   }
 
   /**
@@ -445,7 +457,7 @@ class MessageHandler {
     // Neutralise any registered delta handler (passOn = false path)
     this._deltaGate.active = false;
     this.subscribed = false;
-    this.stale = false;
+    this._stale = false;
     return null;
   }
 
@@ -509,14 +521,14 @@ class MessageHandler {
 
     if (!path || path === "") {
       app.debug(`${this.id} is trying to subscribe to an empty path, subscription aborted`);
-      this.stale = true;
+      this._stale = true;
       return;
     }
 
     app.debug(`Subscribing to ${path}` + (this._source ? ` from source ${this._source}` : ""));
     if (this._idleTimer) {
       clearTimeout(this._idleTimer);
-      this.stale = false;
+      this._stale = false;
     }
 
     if (this._passOn) {
@@ -636,18 +648,35 @@ class MessageHandler {
    * Resets the idle timer for staleness detection.
    * @private
     */
+  get stalenessDetection() {
+    return this._stalenessDetection;
+  }
+
+  set stalenessDetection(val) {
+    this._stalenessDetection = val;
+    if (!val && this._idleTimer) {
+      clearTimeout(this._idleTimer);
+      this._idleTimer = null;
+    }
+    if (!val) this._stale = false;
+  }
+
+  get stale() {
+    return this._stalenessDetection ? this._stale : false;
+  }
+
   _resetIdleTimer() {
-    if (!STALENESS_DETECTION) return;
+    if (!this._stalenessDetection) return;
     if (this._idleTimer) {
       clearTimeout(this._idleTimer);
-      if (this.stale) {
+      if (this._stale) {
         this._app.debug(`Data received for ${this.path}, clearing stale state.`);
        }
-      this.stale = false;
+      this._stale = false;
     }
     this._idleTimer = setTimeout(() => {
       this._app.debug(`No data for ${this.path}`);
-      this.stale = true;
+      this._stale = true;
     }, this.idlePeriod);
   }
 
