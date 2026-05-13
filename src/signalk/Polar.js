@@ -189,10 +189,21 @@ class Polar {
    * @returns {Object}
    */
   get state() {
+    const t1 = this.magnitudeHandler.subscribed ? this.magnitudeHandler.timestamp : null;
+    const t2 = this.angleHandler.subscribed ? this.angleHandler.timestamp : null;
+    const lastDelta = this.timestamp; // most recent of both (max)
+    const oldestDelta = (t1 !== null && t2 !== null) ? Math.min(t1, t2) : (t1 ?? t2);
     return {
       id: this.id,
       ready: this.ready,
-      stale: this.stale,
+      isStale: this.stale,
+      hasDelta: this._ready,
+      pathKnown: this.magnitudeHandler._restMeta !== null && this.angleHandler._restMeta !== null,
+      subscribed: this.magnitudeHandler.subscribed && this.angleHandler.subscribed,
+      stalenessDetection: this.stalenessDetection,
+      lastDelta,
+      deltaAge: oldestDelta ? Date.now() - oldestDelta : null,
+      frequency: this.frequency,
       magnitude: this.magnitudeHandler.state,
       angle: this.angleHandler.state,
     };
@@ -487,10 +498,17 @@ class PolarSmoother {
    * @returns {Object}
    */
   get state() {
+    const lastDelta = this.timestamp;
     return {
       id: this.id,
       ready: this.ready,
-      stale: this.stale,
+      isStale: this.stale,
+      hasDelta: this.n > 0,
+      nSamples: this.n,
+      stalenessDetection: this._stalenessDetection,
+      lastDelta,
+      deltaAge: lastDelta ? Date.now() - lastDelta : null,
+      frequency: this.polar.frequency,
       sources: this.sources,
       magnitude: this.polar.magnitudeHandler.state,
       angle: this.polar.angleHandler.state,
@@ -699,12 +717,19 @@ class SmoothedAngle extends PolarSmoother {
 
   /** Flat state — matches MessageSmoother.state shape. */
   get state() {
+    const lastDelta = this.timestamp;
     return {
       id: this.id,
       ready: this.ready,
-      stale: this.stale,
+      isStale: this.stale,
+      hasDelta: this.n > 0,
+      nSamples: this.n,
+      stalenessDetection: this._stalenessDetection,
+      lastDelta,
+      deltaAge: lastDelta ? Date.now() - lastDelta : null,
       frequency: this.frequency,
-      sources: this.getSources()
+      sources: this.getSources(),
+      handler: this.polar.angleHandler.state,
     };
   }
 

@@ -253,7 +253,20 @@ class MessageSmoother {
    * @returns {Object}
    */
   get state() {
-    return { id: this.id, ready: this.ready, ...this.handler.state };
+    const lastDelta = this.timestamp;
+    return {
+      id: this.id,
+      ready: this.ready,
+      isStale: this.stale,
+      hasDelta: this.n > 0,
+      nSamples: this.n,
+      stalenessDetection: this._stalenessDetection,
+      lastDelta,
+      deltaAge: lastDelta ? Date.now() - lastDelta : null,
+      frequency: this.handler.frequency,
+      sources: this.getSources(),
+      handler: this.handler.state,
+    };
   }
 
   /**
@@ -749,7 +762,20 @@ class MessageHandler {
    * @returns {Object}
    */
   get state() {
-    return { id: this.id, ready: this.ready, stale: this.stale, frequency: this.frequency, sources: this.getSources() };
+    const lastDelta = this.timestamp;
+    return {
+      id: this.id,
+      subscribed: this.subscribed,
+      pathKnown: this._restMeta !== null,
+      hasDelta: this._ready,
+      isStale: this.stale,
+      stalenessDetection: this._stalenessDetection,
+      lastDelta,
+      deltaAge: lastDelta ? Date.now() - lastDelta : null,
+      frequency: this.frequency,
+      sources: this.getSources(),
+      ready: this.ready,
+    };
   }
 
   /**
