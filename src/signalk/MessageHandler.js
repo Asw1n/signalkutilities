@@ -100,11 +100,26 @@ class MessageSmoother {
   set stalenessDetection(val) {
     this._stalenessDetection = val;
     this.handler.stalenessDetection = val;
-    if (!val && this._idleTimer) {
-      clearTimeout(this._idleTimer);
-      this._idleTimer = null;
+    if (!val) {
+      if (this._idleTimer) {
+        clearTimeout(this._idleTimer);
+        this._idleTimer = null;
+      }
+      this._stale = false;
+    } else if (!this._idleTimer) {
+      // Re-enabling: evaluate immediately — don't wait for next delta
+      if (this.timestamp === null) {
+        this._stale = true;
+      } else {
+        const age = Date.now() - this.timestamp;
+        if (age >= this.idlePeriod) {
+          this._stale = true;
+        } else {
+          this._stale = false;
+          this._idleTimer = setTimeout(() => { this._stale = true; }, this.idlePeriod - age);
+        }
+      }
     }
-    if (!val) this._stale = false;
   }
 
   _resetIdleTimer() {
@@ -667,11 +682,29 @@ class MessageHandler {
 
   set stalenessDetection(val) {
     this._stalenessDetection = val;
-    if (!val && this._idleTimer) {
-      clearTimeout(this._idleTimer);
-      this._idleTimer = null;
+    if (!val) {
+      if (this._idleTimer) {
+        clearTimeout(this._idleTimer);
+        this._idleTimer = null;
+      }
+      this._stale = false;
+    } else if (!this._idleTimer) {
+      // Re-enabling: evaluate immediately — don't wait for next delta
+      if (this.timestamp === null) {
+        this._stale = true;
+      } else {
+        const age = Date.now() - this.timestamp;
+        if (age >= this.idlePeriod) {
+          this._stale = true;
+        } else {
+          this._stale = false;
+          this._idleTimer = setTimeout(() => {
+            this._app.debug(`No data for ${this.path}`);
+            this._stale = true;
+          }, this.idlePeriod - age);
+        }
+      }
     }
-    if (!val) this._stale = false;
   }
 
   get stale() {
@@ -684,7 +717,7 @@ class MessageHandler {
       clearTimeout(this._idleTimer);
       if (this._stale) {
         this._app.debug(`Data received for ${this.path}, clearing stale state.`);
-       }
+      }
       this._stale = false;
     }
     this._idleTimer = setTimeout(() => {

@@ -599,11 +599,26 @@ class PolarSmoother {
   set stalenessDetection(val) {
     this._stalenessDetection = val;
     this.polar.stalenessDetection = val;
-    if (!val && this._idleTimer) {
-      clearTimeout(this._idleTimer);
-      this._idleTimer = null;
+    if (!val) {
+      if (this._idleTimer) {
+        clearTimeout(this._idleTimer);
+        this._idleTimer = null;
+      }
+      this._stale = false;
+    } else if (!this._idleTimer) {
+      // Re-enabling: evaluate immediately — don't wait for next delta
+      if (this.timestamp === null) {
+        this._stale = true;
+      } else {
+        const age = Date.now() - this.timestamp;
+        if (age >= this.idlePeriod) {
+          this._stale = true;
+        } else {
+          this._stale = false;
+          this._idleTimer = setTimeout(() => { this._stale = true; }, this.idlePeriod - age);
+        }
+      }
     }
-    if (!val) this._stale = false;
   }
 
   get stale() {
