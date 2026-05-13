@@ -701,6 +701,7 @@ class SmoothedAngle extends PolarSmoother {
     polar.configureAngle(path, source, passOn);
     polar.subscribe(false, true);
     polar.magnitudeHandler.value = 1;
+    polar.magnitudeHandler.stalenessDetection = false; // fixed constant, never subscribed — timestamp stays null forever
     super(polar, SmootherClass, smootherOptions);
     this.polar.setMeta(meta);
     this.setAngleRange(angleRange);
