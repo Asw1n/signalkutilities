@@ -622,7 +622,6 @@ class PolarTable {
     // Add padding and interpolation data
     this._addPolarPadding(polar, app)
 
-    // app && app.debug(JSON.stringify(polar))
     this.table = polar
     return this
   }

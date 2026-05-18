@@ -178,7 +178,7 @@ heading.report(); // { id, value, variance, path, source, state }
 
 ## Smoothers
 
-Three smoother classes are available. All implement the same interface: `add(value, variance?)`, `estimate`, `variance`, `reset()`, `setOptions(opts)`.
+Three smoother classes are available. All implement the same interface: `add(value, variance?)`, `estimate`, `variance`, `reset()`. Options are updated via the `options` property setter (`smoother.options = opts`).
 
 | Class | Options | Use case |
 |---|---|---|

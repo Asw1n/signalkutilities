@@ -39,10 +39,6 @@ class MessageSmoother {
   }
 
   /**
-   * Gets the handler id.
-   * @returns {string}
-   */
-  /**
    * Resets the smoother(s) and determines the value type (scalar or object).
    * Initializes appropriate smoother(s) for the value type.
    */
@@ -585,6 +581,7 @@ class MessageHandler {
         });
         if (found) {
           this._resetIdleTimer();
+          if (this._restMeta === null) this._fetchRestMeta(this._path);
           if (typeof this._onChange === 'function') {
             this._onChange();
           }
@@ -626,13 +623,14 @@ class MessageHandler {
             for (let i = update.values.length - 1; i >= 0; i--) {
               if (path === update.values[i].path) {
                 if (updateSource) this._sources.add(updateSource);
-                if (!label || updateSource === label) {
-                  this._value = update.values[i].value;
-                  this._ready = true;
-                  this.updateFrequency();
-                  found = true;
-                  update.values.splice(i, 1);
+                if (label && updateSource !== label) {
+                  continue; // source filter set but this source doesn't match — pass through unchanged
                 }
+                this._value = update.values[i].value;
+                this._ready = true;
+                this.updateFrequency();
+                found = true;
+                update.values.splice(i, 1);
               }
             }
           }
@@ -640,6 +638,7 @@ class MessageHandler {
       });
       if (found) {
         this._resetIdleTimer();
+        if (this._restMeta === null) this._fetchRestMeta(this._path);
         if (typeof this._onChange === 'function') {
           this._onChange();
         }
@@ -784,6 +783,7 @@ class MessageHandler {
       frequency: this.frequency,
       sources: this.getSources(),
       ready: this.ready,
+      sourceNotFound: this._source !== '' && this._sources.size > 0 && !this._sources.has(this._source),
     };
   }
 

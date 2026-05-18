@@ -641,7 +641,6 @@ class PolarSmoother {
   }
 
   get trace() {
-    //return Math.sqrt(this.xVariance ** 2 + this.yVariance ** 2);
     return this.xVariance + this.yVariance;
   }
 
