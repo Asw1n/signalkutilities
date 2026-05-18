@@ -553,7 +553,7 @@ class MessageHandler {
     const label = (typeof source === 'string' && source) ? source : null;
 
     app.subscriptionmanager.subscribe(
-      { context: 'vessels.self', subscribe: [{ path, policy: 'instant', minPeriod: 0 }] },
+      { context: 'vessels.self', ...(label ? { sourcePolicy: 'all' } : {}), subscribe: [{ path, policy: 'instant', minPeriod: 0 }] },
       this._unsubscribes,
       err => app.debug(`MessageHandler[${this.id}] subscription error: ${err}`),
       delta => {
