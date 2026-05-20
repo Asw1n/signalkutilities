@@ -6,17 +6,12 @@ const { MovingAverageSmoother, ExponentialSmoother, KalmanSmoother } = require('
  * MessageSmoother wraps a MessageHandler and applies a smoothing algorithm
  * using a specified Smoother class (MovingAverageSmoother, ExponentialSmoother, KalmanSmoother).
  * It supports both scalar and object values, automatically creating smoothers for numeric properties in objects.
- * The MessageSmootherpasses on configuration changes to the underlying MessageHandler. 
+ * The MessageSmoother passes on configuration changes to the underlying MessageHandler.
  * 
  **/
 
 class MessageSmoother {
- 
-
-
-
   /**
-   * @param {string} id - Identifier for this handler.
    * @param {MessageHandler} handler - The underlying MessageHandler instance.
    * @param {Function} [SmootherClass=ExponentialSmoother] - The smoother class to use.
    * @param {Object} [smootherOptions={}] - Options to pass to the smoother.
@@ -281,10 +276,6 @@ class MessageSmoother {
   }
 
   /**
-   * Returns a summary object for reporting.
-   * @returns {Object}
-   */
-  /**
    * Returns the list of sources seen by the underlying handler.
    * @returns {string[]}
    */
@@ -292,6 +283,10 @@ class MessageSmoother {
     return this.handler.getSources();
   }
 
+  /**
+   * Returns a summary object for reporting.
+   * @returns {Object}
+   */
   report() {
     return {
       id: this.id,
@@ -552,8 +547,15 @@ class MessageHandler {
     const source = this._source;
     const label = (typeof source === 'string' && source) ? source : null;
 
+    // When a specific source label is requested, sourcePolicy:'all' ensures that source is always
+    // delivered regardless of which source the priority engine currently favours.
+    // When no label is set, excludeSelf:true prevents the plugin's own output from dominating
+    // the priority cascade on new SK servers (silently ignored on older SK — safe no-op).
+    // TODO: Once SK source priorities are stable, remove the label branch and sourcePolicy:'all'.
+    //       See TODO.md for the full simplification plan.
+    const sourcePolicyExtras = label ? { sourcePolicy: 'all' } : { excludeSelf: true };
     app.subscriptionmanager.subscribe(
-      { context: 'vessels.self', ...(label ? { sourcePolicy: 'all' } : {}), subscribe: [{ path, policy: 'instant', minPeriod: 0 }] },
+      { context: 'vessels.self', ...sourcePolicyExtras, subscribe: [{ path, policy: 'instant', minPeriod: 0 }] },
       this._unsubscribes,
       err => app.debug(`MessageHandler[${this.id}] subscription error: ${err}`),
       delta => {
@@ -647,10 +649,6 @@ class MessageHandler {
     });
   }
 
-  /**
-   * Resets the idle timer for staleness detection.
-   * @private
-    */
   get stalenessDetection() {
     return this._stalenessDetection;
   }
@@ -686,6 +684,10 @@ class MessageHandler {
     return this._stalenessDetection ? this._stale : false;
   }
 
+  /**
+   * Resets the idle timer for staleness detection.
+   * @private
+   */
   _resetIdleTimer() {
     if (!this._stalenessDetection) return;
     if (this._idleTimer) {

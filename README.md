@@ -95,6 +95,7 @@ const smoother = createSmoothedHandler({
   id: 'boatSpeed',
   path: 'navigation.speedOverGround',
   app, pluginId,
+  subscribe: true,
   SmootherClass: ExponentialSmoother,
   smootherOptions: { timeConstant: 2 }
 });
