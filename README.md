@@ -34,7 +34,7 @@ Every class exposes three standard accessors:
 | Accessor | When to use | Contents |
 |---|---|---|
 | `meta` | Read once on startup | Static info: `id`, `path`, `displayName`, `displayUnits`, smoother type, etc. |
-| `state` | Poll at any frequency | Dynamic info: `id`, `stale`, `frequency`, `sources` |
+| `state` | Poll at any frequency | Dynamic info: `id`, `stale`, `frequency` |
 | `report()` | Snapshot for logging/API | Combined: id, current value(s), variance, path, `state` |
 
 `Reporter` aggregates these across all objects and returns results keyed by `id`.
@@ -49,16 +49,16 @@ Subscribes to a single Signal K path and tracks the latest value.
 const { MessageHandler } = require('signalkutilities');
 
 const handler = new MessageHandler(app, pluginId, 'boatSpeed');
-handler.configure('navigation.speedOverGround', null, true);
+handler.configure('navigation.speedOverGround');
 handler.subscribe();
 
 // later
 handler.value;       // latest numeric value
 handler.stale;       // true if no update within idlePeriod
 handler.frequency;   // Hz
-handler.meta;        // { id, path, source, displayName, displayUnits, ... }
-handler.state;       // { id, stale, frequency, sources }
-handler.report();    // { id, value, path, source, state }
+handler.meta;        // { id, path, displayName, displayUnits, ... }
+handler.state;       // { id, stale, frequency }
+handler.report();    // { id, value, path, state }
 
 handler.terminate(); // unsubscribe
 ```
@@ -73,7 +73,7 @@ Wraps a `MessageHandler` and applies statistical smoothing to scalar values.
 const { MessageHandler, MessageSmoother, ExponentialSmoother } = require('signalkutilities');
 
 const handler = new MessageHandler(app, pluginId, 'boatSpeed');
-handler.configure('navigation.speedOverGround', null, true);
+handler.configure('navigation.speedOverGround');
 const smoother = new MessageSmoother(handler, ExponentialSmoother, { timeConstant: 2 });
 handler.subscribe();
 handler.onChange = () => smoother.sample();
@@ -82,8 +82,8 @@ smoother.value;          // smoothed value
 smoother.standardError;  // sqrt of variance
 smoother.handler;        // underlying MessageHandler
 smoother.meta;           // includes smoother type and options
-smoother.state;          // { id, stale, frequency, sources }
-smoother.report();       // { id, value, variance, path, source, state }
+smoother.state;          // { id, stale, frequency }
+smoother.report();       // { id, value, variance, path, state }
 ```
 
 Or use the factory:
@@ -125,10 +125,9 @@ const wind = createSmoothedPolar({
 wind.magnitude;   // smoothed speed
 wind.angle;       // smoothed angle (radians)
 wind.trace;       // xVariance + yVariance
-wind.sources;     // union of magnitude and angle sources
 
 wind.meta;        // { id, angleRange, magnitude: {...}, angle: {...}, smoother: {...} }
-wind.state;       // { id, stale, sources, magnitude: {...}, angle: {...} }
+wind.state;       // { id, stale, magnitude: {...}, angle: {...} }
 wind.report();    // { id, pathMagnitude, pathAngle, x, y, magnitude, angle, trace, state }
 
 // Static send — writes smoothed values back to SK
@@ -141,8 +140,8 @@ For unsmoothed use:
 const { Polar } = require('signalkutilities');
 
 const polar = new Polar(app, pluginId, 'apparentWind');
-polar.configureMagnitude('environment.wind.speedApparent', null, true);
-polar.configureAngle('environment.wind.angleApparent', null, true);
+polar.configureMagnitude('environment.wind.speedApparent');
+polar.configureAngle('environment.wind.angleApparent');
 polar.subscribe();
 // polar.add(), polar.rotate(), polar.scale(), etc.
 ```
@@ -167,12 +166,10 @@ heading.value;          // smoothed angle (radians)
 heading.standardError;  // angular uncertainty (radians)
 heading.frequency;      // Hz
 heading.path;           // 'navigation.headingTrue'
-heading.source;         // active source
-heading.getSources();   // all observed sources
 
 heading.meta;    // { id, path, displayUnits, angleRange, smoother: {...}, ... }
-heading.state;   // { id, stale, frequency, sources }
-heading.report(); // { id, value, variance, path, source, state }
+heading.state;   // { id, stale, frequency }
+heading.report(); // { id, value, variance, path, state }
 ```
 
 ---

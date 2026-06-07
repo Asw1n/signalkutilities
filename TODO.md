@@ -8,18 +8,20 @@ machinery in this library can be removed — SK handles it server-side.
 
 ### `MessageHandler`
 
-- [ ] Remove `_subscribeViaHandler` and the `app.registerDeltaInputHandler` subscription path entirely.
-- [ ] Remove the `passOn` parameter from `configure()` and `subscribe()`. Always subscribe via `_subscribeViaManager`.
-- [ ] Remove the `source` parameter from `configure()` and all `label`-based client-side source filtering in the subscription callback.
-- [ ] Remove `sourcePolicy: 'all'` from `_subscribeViaManager` (was needed to guarantee delivery of a named source regardless of priority; no longer relevant once source selection is gone).
-- [ ] Remove `this._sources` / the `_sources` `Set` — source list tracking is no longer needed once SK resolves the preferred source server-side.
+- [x] Remove `_subscribeViaHandler` and the `app.registerDeltaInputHandler` subscription path entirely.
+- [x] Remove the `passOn` parameter from `configure()` and `subscribe()`. Always subscribe via `_subscribeViaManager`.
+- [x] Remove the `source` parameter from `configure()` and all `label`-based client-side source filtering in the subscription callback.
+- [x] Remove `sourcePolicy: 'all'` from `_subscribeViaManager` (was needed to guarantee delivery of a named source regardless of priority; no longer relevant once source selection is gone).
+- [x] Remove `this._sources` / the `_sources` `Set` — source list tracking is no longer needed once SK resolves the preferred source server-side.
 
 ### `Polar`
 
-- [ ] Remove `source` / `passOn` parameters from `configureMagnitude()` and `configureAngle()`.
-- [ ] Remove `source` / `passOn` parameters from `createSmoothedPolar()`.
+- [x] Remove `source` / `passOn` parameters from `configureMagnitude()` and `configureAngle()`.
+- [x] Remove `source` / `passOn` parameters from `createSmoothedPolar()`.
 
 ### Consuming plugins
 
-- [ ] Replace per-path source selection with Signal K source priority configuration in the plugin settings UI.
+- [ ] Remove per-path source selection in the plugin settings UI.
 - [ ] Remove any `source` arguments passed to `configure()`, `configureMagnitude()`, `configureAngle()`, and the factory functions.
+- [ ] Upgrade the plugin configuration schema: remove all source-related fields and the overwrite option, bump the configuration version number, and add migration code to convert existing saved configurations to the new structure.
+- [ ] Remove all UI elements related to the overwrite option from the plugin settings schema/form.

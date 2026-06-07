@@ -48,12 +48,12 @@ class Polar {
     return this._id;
   }
 
-  configureAngle(pathAngle, sourceAngle, passOn = true) {
-    this.angleHandler.configure(pathAngle, sourceAngle, passOn);
+  configureAngle(pathAngle, subscribeOptions = { excludeSelf: true }) {
+    this.angleHandler.configure(pathAngle, subscribeOptions);
   }
 
-  configureMagnitude(pathMagnitude, sourceMagnitude, passOn = true) {
-    this.magnitudeHandler.configure(pathMagnitude, sourceMagnitude, passOn);
+  configureMagnitude(pathMagnitude, subscribeOptions = { excludeSelf: true }) {
+    this.magnitudeHandler.configure(pathMagnitude, subscribeOptions);
   }
 
   /**
@@ -531,7 +531,6 @@ class PolarSmoother {
       lastDelta,
       deltaAge: lastDelta ? Date.now() - lastDelta : null,
       frequency: this.polar.frequency,
-      sources: this.sources,
       magnitude: this.polar.magnitudeHandler.state,
       angle: this.polar.angleHandler.state,
     };
@@ -634,12 +633,6 @@ class PolarSmoother {
     return this.n > 0 && !this.stale;
   }
 
-  get sources() {
-    const mag = this.polar.magnitudeHandler.getSources();
-    const ang = this.polar.angleHandler.getSources();
-    return [...new Set([...mag, ...ang])];
-  }
-
   get trace() {
     return this.xVariance + this.yVariance;
   }
@@ -680,24 +673,23 @@ class PolarSmoother {
  * @param {string} id - Identifier for this smoother (e.g. "heading").
  * @param {string} path - SK path for the angle (e.g. "navigation.headingTrue").
  * @param {Object} [options={}]
- * @param {string|null} [options.source=null] - Source filter.
- * @param {boolean} [options.passOn=true] - Pass delta on to SK stream.
  * @param {string} [options.angleRange='0to2pi'] - '0to2pi' or '-piToPi'.
  * @param {Object} [options.meta={}] - Plugin-owned meta fields (displayName, description, plane).
  * @param {Function} [options.SmootherClass=ExponentialSmoother] - Smoother class to use.
  * @param {Object} [options.smootherOptions={ timeConstant: 1 }] - Options for the smoother.
+ * @param {Object} [options.subscribeOptions={ excludeSelf: true }] - Options passed to the subscription manager.
+ *   Supports `excludeSelf` (boolean) and `excludeSources` (string[]).
  */
 class SmoothedAngle extends PolarSmoother {
   constructor(app, pluginId, id, path, {
-    source = null,
-    passOn = true,
     angleRange = '0to2pi',
     meta = {},
     SmootherClass = ExponentialSmoother,
-    smootherOptions = { timeConstant: 1 }
+    smootherOptions = { timeConstant: 1 },
+    subscribeOptions = { excludeSelf: true }
   } = {}) {
     const polar = new Polar(app, pluginId, id);
-    polar.configureAngle(path, source, passOn);
+    polar.configureAngle(path, subscribeOptions);
     polar.subscribe(false, true);
     polar.magnitudeHandler.value = 1;
     polar.magnitudeHandler.stalenessDetection = false; // fixed constant, never subscribed — timestamp stays null forever
@@ -733,14 +725,6 @@ class SmoothedAngle extends PolarSmoother {
     return this.polar.angleHandler.path;
   }
 
-  get source() {
-    return this.polar.angleHandler.source;
-  }
-
-  getSources() {
-    return this.polar.angleHandler.getSources();
-  }
-
   /** Flat meta — matches MessageSmoother.meta shape. */
   get meta() {
     return {
@@ -765,7 +749,6 @@ class SmoothedAngle extends PolarSmoother {
       lastDelta,
       deltaAge: lastDelta ? Date.now() - lastDelta : null,
       frequency: this.frequency,
-      sources: this.getSources(),
       handler: this.polar.angleHandler.state,
     };
   }
@@ -776,7 +759,6 @@ class SmoothedAngle extends PolarSmoother {
       value: this.value,
       variance: this.variance,
       path: this.path,
-      source: this.source,
       state: this.state
     };
   }
@@ -789,15 +771,14 @@ class SmoothedAngle extends PolarSmoother {
  * @param {string} options.pathMagnitude - Signal K path for magnitude.
  * @param {string} options.subscribe - Subscribe to path.
  * @param {string} options.pathAngle - Signal K path for angle.
- * @param {string} options.sourceMagnitude - Source label for magnitude.
- * @param {string} options.sourceAngle - Source label for angle.
  * @param {Object} options.app - The app instance.
  * @param {string} options.pluginId - Plugin identifier.
  * @param {Function} [options.SmootherClass=ExponentialSmoother] - Smoother class to use.
  * @param {Object} [options.smootherOptions={}] - Options for the smoother.
  * @param {Object} [options.meta={}] - Plugin-owned metadata for the polar (e.g. displayName, description, plane).
- * @param {boolean} [options.passOn=true] - Pass on subscription.
  * @param {String} [options.angleRange='-piToPi'] - Angle range for the polar coordinates, valid values are '0to2pi' or '-piToPi'.
+ * @param {Object} [options.subscribeOptions={ excludeSelf: true }] - Options passed to the subscription manager.
+ *   Supports `excludeSelf` (boolean) and `excludeSources` (string[]).
  * @returns {PolarSmoother}
  */
 function createSmoothedPolar({
@@ -805,21 +786,19 @@ function createSmoothedPolar({
   pathMagnitude,
   pathAngle,
   subscribe = true,
-  sourceMagnitude,
-  sourceAngle,
   app,
   pluginId,
   SmootherClass = ExponentialSmoother,
   smootherOptions = {},
   meta = {},
-  passOn = true,
   angleRange = '-piToPi',
-  magnitudeThreshold = 0.1
+  magnitudeThreshold = 0.1,
+  subscribeOptions = { excludeSelf: true },
 }) {
 
   const polar = new Polar(app, pluginId, id);
-  polar.configureMagnitude(pathMagnitude, sourceMagnitude, passOn);
-  polar.configureAngle(pathAngle, sourceAngle, passOn);
+  polar.configureMagnitude(pathMagnitude, subscribeOptions);
+  polar.configureAngle(pathAngle, subscribeOptions);
   polar.setAngleRange(angleRange);
   polar.setMeta(meta);
   if (magnitudeThreshold !== null) polar.configureFallbackAngle(magnitudeThreshold);

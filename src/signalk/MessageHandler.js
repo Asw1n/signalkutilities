@@ -270,17 +270,8 @@ class MessageSmoother {
       lastDelta,
       deltaAge: lastDelta ? Date.now() - lastDelta : null,
       frequency: this.handler.frequency,
-      sources: this.getSources(),
       handler: this.handler.state,
     };
-  }
-
-  /**
-   * Returns the list of sources seen by the underlying handler.
-   * @returns {string[]}
-   */
-  getSources() {
-    return this.handler.getSources();
   }
 
   /**
@@ -293,7 +284,6 @@ class MessageSmoother {
       path: this.handler.path,
       value: this.value,
       variance: this.variance,
-      source: this.handler.source,
       state: this.state
     };
   }
@@ -335,15 +325,12 @@ class MessageHandler {
     this.n = 0;
     this.idlePeriod = 4000; // ms
     this._idleTimer = null;
-    this._passOn = true;
     this._path="";
-    this._source="";
-    this._sources = new Set();
     this._unsubscribes = [];      // holds unsubscribe fns pushed by subscriptionmanager
-    this._deltaGate = { active: false }; // gates registered delta handlers after terminate()
     this._restMeta = null;
     this._stale = false;
     this._stalenessDetection = true;
+    this._subscribeOptions = { excludeSelf: true };
   }
 
   /**
@@ -376,7 +363,6 @@ class MessageHandler {
 
   set path(newPath) {
     this._path = newPath;
-    this._sources = new Set();
     this._restMeta = null;
     this._fetchRestMeta(newPath);
     if (this.subscribed ) {
@@ -389,30 +375,6 @@ class MessageHandler {
     return this._path;
   }
 
-  set source(newSource) {
-    this._source = typeof newSource === 'string' ? newSource.replace(/\s+/g, "") : newSource;
-    if (this.subscribed ) {
-      this.terminate(false);
-      this.subscribe();
-    }
-  }
-
-  get source() {
-    return this._source;
-  }
-
-  set passOn(newPassOn) {
-    this._passOn = newPassOn;
-    if (this.subscribed ) {
-      this.terminate(false);
-      this.subscribe( );
-    } 
-  }
-
-  get passOn() {
-    return this._passOn;
-  }
-
   set onChange(newOnChange) {
     this._onChange = newOnChange;
   }
@@ -421,11 +383,17 @@ class MessageHandler {
     return this._onChange;
   }
 
-  configure(path, source, passOn = true, onChange) {
+  /**
+   * Configures the path and subscription options for this handler.
+   * @param {string} path - The Signal K path to subscribe to.
+   * @param {Object} [subscribeOptions={ excludeSelf: true }] - Options passed to the subscription manager.
+   *   Supports `excludeSelf` (boolean) and `excludeSources` (string[]).
+   *   Pass `{}` to receive the plugin's own output alongside other sources.
+   * @returns {this}
+   */
+  configure(path, subscribeOptions = { excludeSelf: true }) {
     this._path = path;
-    this._source = typeof source === 'string' ? source.replace(/\s+/g, "") : source;
-    this._passOn = passOn;
-    if (onChange !== undefined) this._onChange = onChange;
+    this._subscribeOptions = subscribeOptions;
     this._restMeta = null;
     this._fetchRestMeta(path);
     if (this.subscribed) {
@@ -446,11 +414,9 @@ class MessageHandler {
       clearTimeout(this._idleTimer);
       this._idleTimer = null;
     }
-    // Release subscriptionmanager subscription (passOn = true path)
+    // Release subscriptionmanager subscription
     this._unsubscribes.forEach(fn => fn());
     this._unsubscribes = [];
-    // Neutralise any registered delta handler (passOn = false path)
-    this._deltaGate.active = false;
     this.subscribed = false;
     this._stale = false;
     return null;
@@ -520,63 +486,37 @@ class MessageHandler {
       return;
     }
 
-    app.debug(`Subscribing to ${path}` + (this._source ? ` from source ${this._source}` : ""));
+    app.debug(`Subscribing to ${path}`);
     if (this._idleTimer) {
       clearTimeout(this._idleTimer);
       this._stale = false;
     }
 
-    if (this._passOn) {
-      this._subscribeViaManager(path);
-    } else {
-      this._subscribeViaHandler(path);
-    }
-
+    this._subscribeViaManager(path);
     this.subscribed = true;
     return this;
   }
 
   /**
-   * Subscribes using app.subscriptionmanager (passOn = true).
-   * Provides efficient path-scoped delivery and proper unsubscription.
+   * Subscribes to a path via the subscription manager.
    * @private
    */
   _subscribeViaManager(path) {
     const app = this._app;
-    const pluginId = this._pluginId;
-    const source = this._source;
-    const label = (typeof source === 'string' && source) ? source : null;
-
-    // When a specific source label is requested, sourcePolicy:'all' ensures that source is always
-    // delivered regardless of which source the priority engine currently favours.
-    // When no label is set, excludeSelf:true prevents the plugin's own output from dominating
-    // the priority cascade on new SK servers (silently ignored on older SK — safe no-op).
-    // TODO: Once SK source priorities are stable, remove the label branch and sourcePolicy:'all'.
-    //       See TODO.md for the full simplification plan.
-    const sourcePolicyExtras = label ? { sourcePolicy: 'all' } : { excludeSelf: true };
     app.subscriptionmanager.subscribe(
-      { context: 'vessels.self', ...sourcePolicyExtras, subscribe: [{ path, policy: 'instant', minPeriod: 0 }] },
+      { context: 'vessels.self', ...this._subscribeOptions, subscribe: [{ path, policy: 'instant', minPeriod: 0 }] },
       this._unsubscribes,
       err => app.debug(`MessageHandler[${this.id}] subscription error: ${err}`),
       delta => {
         let found = false;
         delta?.updates?.forEach(update => {
-          const updateSource = update?.$source ?? update?.source?.label;
-          const isOwnSource = update?.source?.label === pluginId ||
-            updateSource === pluginId ||
-            (typeof updateSource === 'string' && updateSource.startsWith(pluginId + '.'));
-          if (!isOwnSource) {
-            if (Array.isArray(update?.values)) {
-              for (const entry of update.values) {
-                if (path === entry.path) {
-                  if (updateSource) this._sources.add(updateSource);
-                  if (!label || updateSource === label) {
-                    this._value = entry.value;
-                    this._ready = true;
-                    this.updateFrequency();
-                    found = true;
-                  }
-                }
+          if (Array.isArray(update?.values)) {
+            for (const entry of update.values) {
+              if (path === entry.path) {
+                this._value = entry.value;
+                this._ready = true;
+                this.updateFrequency();
+                found = true;
               }
             }
           }
@@ -590,63 +530,6 @@ class MessageHandler {
         }
       }
     );
-  }
-
-  /**
-   * Subscribes using app.registerDeltaInputHandler (passOn = false).
-   * Required when the delta must be suppressed from the stream.
-   * The handler is gated so terminate() renders it inert without deregistering it.
-   * @private
-   */
-  _subscribeViaHandler(path) {
-    const app = this._app;
-    const pluginId = this._pluginId;
-    const source = this._source;
-    const label = (typeof source === 'string' && source) ? source : null;
-    const gate = this._deltaGate;
-    gate.active = true;
-
-    app.registerDeltaInputHandler((delta, next) => {
-      if (!gate.active) return next(delta);
-
-      const selfContext = app.selfContext ?? 'vessels.self';
-      if (delta && delta.context && delta.context !== selfContext) {
-        return next(delta);
-      }
-
-      let found = false;
-      delta?.updates?.forEach(update => {
-        const updateSource = update?.$source ?? update?.source?.label;
-        const isOwnSource = update?.source?.label === pluginId ||
-          updateSource === pluginId ||
-          (typeof updateSource === 'string' && updateSource.startsWith(pluginId + '.'));
-        if (!isOwnSource) {
-          if (Array.isArray(update?.values)) {
-            for (let i = update.values.length - 1; i >= 0; i--) {
-              if (path === update.values[i].path) {
-                if (updateSource) this._sources.add(updateSource);
-                if (label && updateSource !== label) {
-                  continue; // source filter set but this source doesn't match — pass through unchanged
-                }
-                this._value = update.values[i].value;
-                this._ready = true;
-                this.updateFrequency();
-                found = true;
-                update.values.splice(i, 1);
-              }
-            }
-          }
-        }
-      });
-      if (found) {
-        this._resetIdleTimer();
-        if (this._restMeta === null) this._fetchRestMeta(this._path);
-        if (typeof this._onChange === 'function') {
-          this._onChange();
-        }
-      }
-      next(delta);
-    });
   }
 
   get stalenessDetection() {
@@ -761,9 +644,9 @@ class MessageHandler {
           merged[key] = val;
         }
       }
-      return { id: this.id, path: this.path, source: this.source, idlePeriod: this.idlePeriod, ...merged };
+      return { id: this.id, path: this.path, idlePeriod: this.idlePeriod, ...merged };
     } catch (e) {
-      return { id: this.id, path: this.path, source: this.source, idlePeriod: this.idlePeriod, ...(this._restMeta ?? {}) };
+      return { id: this.id, path: this.path, idlePeriod: this.idlePeriod, ...(this._restMeta ?? {}) };
     }
   }
 
@@ -783,9 +666,7 @@ class MessageHandler {
       lastDelta,
       deltaAge: lastDelta ? Date.now() - lastDelta : null,
       frequency: this.frequency,
-      sources: this.getSources(),
       ready: this.ready,
-      sourceNotFound: this._source !== '' && this._sources.size > 0 && !this._sources.has(this._source),
     };
   }
 
@@ -802,16 +683,6 @@ class MessageHandler {
   }
 
   /**
-   * Returns the list of sources seen for the subscribed path.
-   * Empty if not subscribed or no data received yet.
-   * Cleared when path changes.
-   * @returns {string[]}
-   */
-  getSources() {
-    return [...this._sources];
-  }
-
-  /**
    * Returns a summary object for reporting.
    * @returns {Object}
    */
@@ -820,7 +691,6 @@ class MessageHandler {
       id: this.id,
       path: this.path,
       value: this.value,
-      source: this.source,
       state: this.state
     };
   }
@@ -829,15 +699,15 @@ class MessageHandler {
 function createSmoothedHandler({
   id,
   path,
-  source,
   subscribe = false,
   app,
   pluginId,
   SmootherClass = ExponentialSmoother,
   smootherOptions = {},
+  subscribeOptions = { excludeSelf: true },
 }) {
   const handler = new MessageHandler(app, pluginId, id);
-  handler.configure(path, source, true);
+  handler.configure(path, subscribeOptions);
   const smoother = new MessageSmoother(handler, SmootherClass, smootherOptions); // create before subscribe to avoid race
   if (subscribe) {
     handler.subscribe();

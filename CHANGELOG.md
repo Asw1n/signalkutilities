@@ -7,10 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned
-- Remove client-side source-selection machinery once Signal K source priorities are stable (see [SK PR #2688](https://github.com/SignalK/signalk-server/pull/2688)):
-  - `MessageHandler`: remove `_subscribeViaHandler`, `passOn`, `source`, `sourcePolicy: 'all'`, and `_sources` tracking.
-  - `Polar`: remove `source`/`passOn` from `configureMagnitude()`, `configureAngle()`, and `createSmoothedPolar()`.
+---
+
+## [2.0.0] — 2026-06-02
+
+### Changed (Breaking)
+- Source selection has been removed from all subscription APIs. The Signal K server now manages source priority natively, so plugins no longer need to specify which data source to use — the highest-priority source is delivered automatically.
+- The `source` and `passOn` parameters have been removed from `configure()`, `configureMagnitude()`, `configureAngle()`, `createSmoothedHandler()`, `createSmoothedPolar()`, and the `SmoothedAngle` constructor. Any code passing these arguments must be updated to omit them.
+
+### Removed
+- `getSources()` method removed from all handler and smoother classes.
+- `source` property removed from `MessageHandler`, `MessageSmoother`, and `SmoothedAngle`.
+- `passOn` property removed from `MessageHandler`.
+- `state.sources` field removed from handler, smoother, and polar state objects.
+- `report().source` field removed from smoother report output.
 
 ---
 
@@ -29,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial changelog entry. Established baseline.
 
-[Unreleased]: https://github.com/Asw1n/signalkutilities/compare/v1.12.3...HEAD
+[Unreleased]: https://github.com/Asw1n/signalkutilities/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/Asw1n/signalkutilities/compare/v1.12.3...v2.0.0
 [1.12.3]: https://github.com/Asw1n/signalkutilities/compare/v1.12.2...v1.12.3
 [1.12.2]: https://github.com/Asw1n/signalkutilities/releases/tag/v1.12.2
