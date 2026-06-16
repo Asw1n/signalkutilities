@@ -328,6 +328,8 @@ class MessageHandler {
     this._path="";
     this._unsubscribes = [];      // holds unsubscribe fns pushed by subscriptionmanager
     this._restMeta = null;
+    this._fetchPending = false;
+    this._metaCache = null;
     this._stale = false;
     this._stalenessDetection = true;
     this._subscribeOptions = { excludeSelf: true };
@@ -364,6 +366,8 @@ class MessageHandler {
   set path(newPath) {
     this._path = newPath;
     this._restMeta = null;
+    this._metaCache = null;
+    this._fetchPending = false;
     this._fetchRestMeta(newPath);
     if (this.subscribed ) {
       this.terminate(false);
@@ -395,6 +399,8 @@ class MessageHandler {
     this._path = path;
     this._subscribeOptions = subscribeOptions;
     this._restMeta = null;
+    this._metaCache = null;
+    this._fetchPending = false;
     this._fetchRestMeta(path);
     if (this.subscribed) {
       this.terminate(false);
@@ -589,10 +595,12 @@ class MessageHandler {
   /**
    * Fetches metadata for the given path from the SK REST API and caches it.
    * Fire-and-forget; called whenever the path changes.
+   * Guarded by _fetchPending to prevent multiple concurrent in-flight requests.
    * @private
    */
   _fetchRestMeta(path) {
-    if (!path) return;
+    if (!path || this._fetchPending) return;
+    this._fetchPending = true;
     const app = this._app;
     const protocol = app.config?.ssl ? 'https' : 'http';
     const port = app.config?.port ?? app.config?.settings?.port ?? 3000;
@@ -600,8 +608,17 @@ class MessageHandler {
     const url = `${protocol}://localhost:${port}/signalk/v1/api/vessels/self/${skPath}/meta`;
     fetch(url)
       .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data && typeof data === 'object') this._restMeta = data; })
-      .catch(err => app.debug(`MessageHandler[${this.id}]: REST meta fetch failed for ${path}: ${err.message}`));
+      .then(data => {
+        this._fetchPending = false;
+        if (data && typeof data === 'object') {
+          this._restMeta = data;
+          this._metaCache = null; // invalidate cached meta
+        }
+      })
+      .catch(err => {
+        this._fetchPending = false;
+        app.debug(`MessageHandler[${this.id}]: REST meta fetch failed for ${path}: ${err.message}`);
+      });
   }
 
   /**
@@ -623,7 +640,9 @@ class MessageHandler {
 
   /**
    * Gets static metadata for this handler.
-   * Lazily reads SK meta for this path on every call — no caching.
+   * The REST-sourced portion (_restMeta) is merged once and cached in _metaCache;
+   * the cache is invalidated when _restMeta changes or the path is reset.
+   * getSelfPath() is still called on every read because it reflects live SK state.
    * SK may contribute displayName, description, units, zones, etc.
    * If a field is absent from SK, it will not appear here — the webapp supplies fallbacks.
    * @returns {Object}
@@ -631,20 +650,24 @@ class MessageHandler {
   get meta() {
     try {
       const skMeta = this._app.getSelfPath(this.path)?.meta ?? {};
-      const restMeta = this._restMeta ?? {};
-      // REST cache is the base; getSelfPath overlays field by field.
-      // For object-valued fields (e.g. displayUnits), merge one level deeper so
-      // REST cache fills any members that getSelfPath omits due to the known bug.
-      const merged = { ...restMeta };
-      for (const [key, val] of Object.entries(skMeta)) {
-        if (val && typeof val === 'object' && !Array.isArray(val) &&
-            merged[key] && typeof merged[key] === 'object') {
-          merged[key] = { ...merged[key], ...val };
-        } else {
-          merged[key] = val;
+      if (!this._metaCache) {
+        // Rebuild the REST-layer merge. Only runs when _restMeta changes.
+        const restMeta = this._restMeta ?? {};
+        // REST cache is the base; getSelfPath overlays field by field.
+        // For object-valued fields (e.g. displayUnits), merge one level deeper so
+        // REST cache fills any members that getSelfPath omits due to the known bug.
+        const merged = { ...restMeta };
+        for (const [key, val] of Object.entries(skMeta)) {
+          if (val && typeof val === 'object' && !Array.isArray(val) &&
+              merged[key] && typeof merged[key] === 'object') {
+            merged[key] = { ...merged[key], ...val };
+          } else {
+            merged[key] = val;
+          }
         }
+        this._metaCache = merged;
       }
-      return { id: this.id, path: this.path, idlePeriod: this.idlePeriod, ...merged };
+      return { id: this.id, path: this.path, idlePeriod: this.idlePeriod, ...this._metaCache };
     } catch (e) {
       return { id: this.id, path: this.path, idlePeriod: this.idlePeriod, ...(this._restMeta ?? {}) };
     }

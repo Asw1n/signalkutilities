@@ -67,7 +67,8 @@ class BaseSmoother {
 
 /**
  * Moving average smoother with a time window.
- * Does not use variance.
+ * Does not accept input variance — all samples are treated as equally trusted.
+ * Computes and exposes population variance of the current window.
  */
 class MovingAverageSmoother extends BaseSmoother {
   /**
@@ -83,23 +84,53 @@ class MovingAverageSmoother extends BaseSmoother {
    */
   reset() {
     super.reset();
-    this._timeSpan = this._options.timeSpan || 1; 
-    this._window = []; 
+    this._timeSpan = this._options.timeSpan || 1;
+    // Two parallel arrays form a queue. _head is the index of the oldest live entry.
+    // Separate arrays avoid a {value, timestamp} allocation per sample.
+    this._vals = [];
+    this._times = [];
+    this._head = 0;
+    this._sum = 0;
+    this._sumSq = 0;
     this._estimate = null;
-    this._variance = null; 
+    this._variance = null;
+  }
+
+  /**
+   * Evict samples older than cutoff, updating running sums in O(expired) time.
+   * @private
+   */
+  _evict(cutoff) {
+    while (this._head < this._vals.length && this._times[this._head] < cutoff) {
+      const v = this._vals[this._head];
+      this._sum -= v;
+      this._sumSq -= v * v;
+      this._head++;
+    }
+    // Compact backing arrays periodically to prevent unbounded memory growth.
+    if (this._head >= 128) {
+      this._vals = this._vals.slice(this._head);
+      this._times = this._times.slice(this._head);
+      this._head = 0;
+    }
   }
 
   /**
    * Add a new value to the moving average.
+   * O(1) amortised: no per-sample object, no array copy, no multi-pass iteration.
    * @param {number} value - The new value.
    */
   add(value) {
-    // nb, variance cannot be used here
-    this._window.push({ value, timestamp: Date.now() });
-    const cutoff = Date.now() - this._timeSpan*1000;
-    this._window = this._window.filter(entry => entry.timestamp >= cutoff);
-    this._estimate = this._window.reduce((sum, entry) => sum + entry.value, 0) / this._window.length;
-    this._variance = this._window.reduce((sum, entry) => sum + Math.pow(entry.value - this._estimate, 2), 0) / this._window.length;
+    const now = Date.now();
+    this._evict(now - this._timeSpan * 1000);
+    this._vals.push(value);
+    this._times.push(now);
+    this._sum += value;
+    this._sumSq += value * value;
+    const n = this._vals.length - this._head;
+    this._estimate = this._sum / n;
+    // Var = E[x²] − (E[x])²  — clamped to 0 to guard against floating-point underflow.
+    this._variance = Math.max(0, this._sumSq / n - this._estimate * this._estimate);
   }
 
   /**
@@ -107,7 +138,8 @@ class MovingAverageSmoother extends BaseSmoother {
    * @returns {number|null}
    */
   get standardError() {
-    return this._variance !== null && this._window.length > 0 ? Math.sqrt(this._variance / this._window.length) : null;
+    const n = this._vals.length - this._head;
+    return (this._variance !== null && n > 0) ? Math.sqrt(this._variance / n) : null;
   }
 }
 

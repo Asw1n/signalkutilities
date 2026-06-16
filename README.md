@@ -57,7 +57,7 @@ handler.value;       // latest numeric value
 handler.stale;       // true if no update within idlePeriod
 handler.frequency;   // Hz
 handler.meta;        // { id, path, displayName, displayUnits, ... }
-handler.state;       // { id, stale, frequency }
+handler.state;       // { id, isStale, frequency, ... }
 handler.report();    // { id, value, path, state }
 
 handler.terminate(); // unsubscribe
@@ -82,7 +82,7 @@ smoother.value;          // smoothed value
 smoother.standardError;  // sqrt of variance
 smoother.handler;        // underlying MessageHandler
 smoother.meta;           // includes smoother type and options
-smoother.state;          // { id, stale, frequency }
+smoother.state;          // { id, isStale, frequency, ... }
 smoother.report();       // { id, value, variance, path, state }
 ```
 
@@ -127,7 +127,7 @@ wind.angle;       // smoothed angle (radians)
 wind.trace;       // xVariance + yVariance
 
 wind.meta;        // { id, angleRange, magnitude: {...}, angle: {...}, smoother: {...} }
-wind.state;       // { id, stale, magnitude: {...}, angle: {...} }
+wind.state;       // { id, isStale, magnitude: {...}, angle: {...}, ... }
 wind.report();    // { id, pathMagnitude, pathAngle, x, y, magnitude, angle, trace, state }
 
 // Static send — writes smoothed values back to SK
@@ -168,7 +168,7 @@ heading.frequency;      // Hz
 heading.path;           // 'navigation.headingTrue'
 
 heading.meta;    // { id, path, displayUnits, angleRange, smoother: {...}, ... }
-heading.state;   // { id, stale, frequency }
+heading.state;   // { id, isStale, frequency, ... }
 heading.report(); // { id, value, variance, path, state }
 ```
 

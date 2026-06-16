@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.0.1] — 2026-06-14
+
+### Fixed
+- `MovingAverageSmoother`: replaced per-sample `{value, timestamp}` object allocation, `Array.filter()` copy, and two-pass `reduce()` with a circular-buffer queue and O(1) amortised running sums. No behaviour change; significantly lower CPU and GC pressure at typical SK sample rates.
+- `MovingAverageSmoother`: class-level comment corrected — the smoother does not consume input variance but does compute and expose population variance of the current window.
+- `Polar.trace`: was returning the L2-norm of the variance vector (`√(σx⁴ + σy⁴)`), which has no standard meaning. Now returns the matrix trace (`σx² + σy²`), consistent with `PolarSmoother.trace`.
+- `MessageHandler._fetchRestMeta`: added `_fetchPending` guard to prevent multiple concurrent in-flight REST requests for the same path between the first delta and the fetch resolving.
+- `MessageHandler.meta`: the REST-layer merge (spread + field-by-field loop) is now cached in `_metaCache` and only rebuilt when `_restMeta` changes or the path is reset, instead of on every poll.
+
+### Added
+- `src/tests/smoothers.js`: test suite for all four smoother classes covering construction, convergence, expiry, compaction, reset, and options update.
+
+---
+
 ## [2.0.0] — 2026-06-02
 
 ### Changed (Breaking)
@@ -39,7 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial changelog entry. Established baseline.
 
-[Unreleased]: https://github.com/Asw1n/signalkutilities/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/Asw1n/signalkutilities/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/Asw1n/signalkutilities/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/Asw1n/signalkutilities/compare/v1.12.3...v2.0.0
 [1.12.3]: https://github.com/Asw1n/signalkutilities/compare/v1.12.2...v1.12.3
 [1.12.2]: https://github.com/Asw1n/signalkutilities/releases/tag/v1.12.2
