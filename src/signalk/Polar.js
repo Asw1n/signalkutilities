@@ -28,6 +28,22 @@ class Polar {
      if (values.length > 0) app.handleMessage(pluginId, message);
   }
 
+  // Write null to the magnitude and angle SK paths for each polar.
+  // Accepts Polar or PolarSmoother (delegates via .polar pointer) so callers
+  // can pass either type.
+  static clear(app, pluginId, polars) {
+    const values = [];
+    polars.forEach(p => {
+      const polar = p.polar ?? p;
+      if (polar.pathMagnitude) values.push({ path: polar.pathMagnitude, value: null });
+      if (polar.pathAngle) values.push({ path: polar.pathAngle, value: null });
+    });
+    if (values.length > 0) app.handleMessage(pluginId, {
+      context: 'vessels.self',
+      updates: [{ $source: pluginId, values }]
+    });
+  }
+
   constructor(app, pluginId, id) {
     this._app = app;
     this._pluginId = pluginId;
@@ -504,6 +520,12 @@ class PolarSmoother {
       ]
     };
     if (values.length > 0) app.handleMessage(pluginId, message);
+  }
+
+  // Write null to the magnitude and angle SK paths. Delegates to Polar.clear
+  // via the .polar pointer.
+  static clear(app, pluginId, polarsSmoothed) {
+    Polar.clear(app, pluginId, polarsSmoothed);
   }
 
   /**

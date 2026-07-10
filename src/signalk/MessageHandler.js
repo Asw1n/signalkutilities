@@ -458,6 +458,19 @@ class MessageHandler {
     if (values.length > 0) app.handleMessage(pluginId, message);
   }
 
+  // Write null to the SK path for each handler. Accepts MessageHandler or MessageSmoother
+  // (delegates via .handler pointer) so callers can pass either type.
+  static clear(app, pluginId, handlers) {
+    const values = handlers
+      .map(h => (h.handler ? h.handler.path : h.path))
+      .filter(path => path)
+      .map(path => ({ path, value: null }));
+    if (values.length > 0) app.handleMessage(pluginId, {
+      context: 'vessels.self',
+      updates: [{ $source: pluginId, values }]
+    });
+  }
+
   // Send meta updates for one or more paths
   static sendMeta(app, pluginId, metaEntries) {
     const meta = metaEntries.map(entry => ({
