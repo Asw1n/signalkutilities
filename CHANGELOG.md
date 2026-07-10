@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.1.0] — 2026-07-10
+
+### Added
+- `MessageHandler.clear(app, pluginId, handlers)` — static method that writes `null` to the SK path of each handler. Accepts `MessageHandler` or `MessageSmoother` (delegates via `.handler` pointer).
+- `Polar.clear(app, pluginId, polars)` — static method that writes `null` to the magnitude and angle SK paths of each polar. Accepts `Polar` or `PolarSmoother` (delegates via `.polar` pointer).
+- `PolarSmoother.clear(app, pluginId, polarsSmoothed)` — thin wrapper that delegates to `Polar.clear`.
+
+---
+
 ## [2.0.1] — 2026-06-14
 
 ### Fixed
