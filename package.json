@@ -4,7 +4,7 @@
   "description": "Utilities for Signal K plugin development: message handling, polar vector maths, statistical smoothing, and web reporting",
   "main": "index.js",
   "scripts": {
-    "test": "node src/tests/Table2D.js && node src/tests/PolarTable.js && node src/tests/smoothers.js"
+    "test": "node src/tests/Table2D.js && node src/tests/smoothers.js"
   },
   "author": "aswin.bouwmeester@gmail.com",
   "license": "ISC",
@@ -33,3 +33,4 @@
     "src/web/**"
   ]
 }
+

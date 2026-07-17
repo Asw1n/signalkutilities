@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- PolarTable has been removed from signalkutilities. The polar-performance plugin now owns that implementation in its own package.
+
 ---
 
 ## [2.1.0] — 2026-07-10
@@ -67,3 +70,4 @@ Initial changelog entry. Established baseline.
 [2.0.0]: https://github.com/Asw1n/signalkutilities/compare/v1.12.3...v2.0.0
 [1.12.3]: https://github.com/Asw1n/signalkutilities/compare/v1.12.2...v1.12.3
 [1.12.2]: https://github.com/Asw1n/signalkutilities/releases/tag/v1.12.2
+

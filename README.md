@@ -200,7 +200,7 @@ const { Reporter } = require('signalkutilities');
 const reporter = new Reporter();
 reporter.addDelta(boatSpeed);        // MessageHandler or MessageSmoother
 reporter.addPolar(apparentWind);     // Polar or PolarSmoother or SmoothedAngle
-reporter.addTable(polarTable);       // PolarTable
+reporter.addTable(customTable);      // any object exposing id/meta/state/report
 
 // In your webapp GET handler:
 res.json(reporter.state());   // { deltas: { boatSpeed: {...}, ... }, polars: { ... } }
@@ -210,8 +210,7 @@ res.json(reporter.report());  // combined snapshot
 
 ---
 
-## Table2D / PolarTable / SI
+## Table2D / SI
 
 - **`Table2D`** — generic 2-D interpolation table.
-- **`PolarTable`** — sailing polar performance table (Jieter CSV format). Provides optimal angles, VMG, and interpolated boat speed for any TWS/TWA.
 - **`SI`** — unit conversion helpers.

@@ -27,7 +27,6 @@ It is **not a Signal K plugin itself**. It is a local npm dependency (`npm link`
 | `BaseSmoother` / `MovingAverageSmoother` / `ExponentialSmoother` / `KalmanSmoother` | Smoothing algorithms |
 | `Reporter` | Aggregates handler/polar state and meta for JSON HTTP responses to the webapp |
 | `Table2D` | 2D interpolation table |
-| `PolarTable` | Polar-keyed 2D table |
 | `SI` | SI unit conversion utilities |
 
 ## meta / state API
@@ -49,6 +48,6 @@ Never put runtime-changing properties in `meta`, and never put configuration-fix
 ## Development Workflow
 
 This library is consumed via `npm link`. After making changes:
-1. Test with `npm test` (runs Table2D, PolarTable, smoothers tests)
+1. Test with `npm test` (runs Table2D and smoothers tests)
 2. Re-link in each consuming project if the exports change: `cd <plugin>; npm link signalkutilities`
 3. Bump the version in `package.json` following semver

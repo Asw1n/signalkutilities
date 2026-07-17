@@ -1,5 +1,4 @@
 const Table2D = require('./src/general/Table2D');
-const { PolarTable } = require('./src/general/PolarTable');
 const SI = require('./src/general/SI');
 const Reporter = require('./src/web/Reporter');
 
@@ -25,7 +24,6 @@ const {
 
 module.exports = {
   Table2D,
-  PolarTable,
   SI,
   Reporter,
   MessageHandler,
