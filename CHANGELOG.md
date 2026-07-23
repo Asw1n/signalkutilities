@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `MessageHandler` no longer floods the server HTTP log with repeated `401` errors on servers with security enabled and anonymous read access disabled. The async REST meta fetch (`_fetchRestMeta`) has been replaced by a synchronous in-process call to `app.getMetadata`, which requires no authentication and carries no HTTP overhead. Spec-defined metadata (units, description) is loaded immediately when a path is configured and re-attempted lazily on each `meta` getter read for unknown paths.
+
 ---
 
 ## [3.0.0] — 2026-07-17

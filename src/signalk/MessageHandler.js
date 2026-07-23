@@ -327,8 +327,7 @@ class MessageHandler {
     this._idleTimer = null;
     this._path="";
     this._unsubscribes = [];      // holds unsubscribe fns pushed by subscriptionmanager
-    this._restMeta = null;
-    this._fetchPending = false;
+    this._specMeta = null;
     this._metaCache = null;
     this._stale = false;
     this._stalenessDetection = true;
@@ -365,10 +364,9 @@ class MessageHandler {
 
   set path(newPath) {
     this._path = newPath;
-    this._restMeta = null;
+    this._specMeta = null;
     this._metaCache = null;
-    this._fetchPending = false;
-    this._fetchRestMeta(newPath);
+    this._loadSpecMeta(newPath);
     if (this.subscribed ) {
       this.terminate(false);
       this.subscribe();
@@ -398,10 +396,9 @@ class MessageHandler {
   configure(path, subscribeOptions = { excludeSelf: true }) {
     this._path = path;
     this._subscribeOptions = subscribeOptions;
-    this._restMeta = null;
+    this._specMeta = null;
     this._metaCache = null;
-    this._fetchPending = false;
-    this._fetchRestMeta(path);
+    this._loadSpecMeta(path);
     if (this.subscribed) {
       this.terminate(false);
       this.subscribe();
@@ -542,7 +539,6 @@ class MessageHandler {
         });
         if (found) {
           this._resetIdleTimer();
-          if (this._restMeta === null) this._fetchRestMeta(this._path);
           if (typeof this._onChange === 'function') {
             this._onChange();
           }
@@ -606,32 +602,19 @@ class MessageHandler {
   }
 
   /**
-   * Fetches metadata for the given path from the SK REST API and caches it.
-   * Fire-and-forget; called whenever the path changes.
-   * Guarded by _fetchPending to prevent multiple concurrent in-flight requests.
+   * Loads spec-defined metadata for the given path using app.getMetadata.
+   * Synchronous and in-process — no HTTP, no authentication required.
+   * Safe to call on every delta: if the path is unknown getMetadata returns
+   * null/undefined and _specMeta stays null, which is fine.
    * @private
    */
-  _fetchRestMeta(path) {
-    if (!path || this._fetchPending) return;
-    this._fetchPending = true;
-    const app = this._app;
-    const protocol = app.config?.ssl ? 'https' : 'http';
-    const port = app.config?.port ?? app.config?.settings?.port ?? 3000;
-    const skPath = path.replace(/\./g, '/');
-    const url = `${protocol}://localhost:${port}/signalk/v1/api/vessels/self/${skPath}/meta`;
-    fetch(url)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        this._fetchPending = false;
-        if (data && typeof data === 'object') {
-          this._restMeta = data;
-          this._metaCache = null; // invalidate cached meta
-        }
-      })
-      .catch(err => {
-        this._fetchPending = false;
-        app.debug(`MessageHandler[${this.id}]: REST meta fetch failed for ${path}: ${err.message}`);
-      });
+  _loadSpecMeta(path) {
+    if (!path) return;
+    const data = this._app.getMetadata?.('vessels.self.' + path);
+    if (data && typeof data === 'object') {
+      this._specMeta = data;
+      this._metaCache = null; // invalidate cached meta
+    }
   }
 
   /**
@@ -653,8 +636,8 @@ class MessageHandler {
 
   /**
    * Gets static metadata for this handler.
-   * The REST-sourced portion (_restMeta) is merged once and cached in _metaCache;
-   * the cache is invalidated when _restMeta changes or the path is reset.
+   * The spec-metadata portion (_specMeta) is merged once and cached in _metaCache;
+   * the cache is invalidated when _specMeta changes or the path is reset.
    * getSelfPath() is still called on every read because it reflects live SK state.
    * SK may contribute displayName, description, units, zones, etc.
    * If a field is absent from SK, it will not appear here — the webapp supplies fallbacks.
@@ -662,10 +645,11 @@ class MessageHandler {
    */
   get meta() {
     try {
+      if (this._specMeta === null) this._loadSpecMeta(this._path);
       const skMeta = this._app.getSelfPath(this.path)?.meta ?? {};
       if (!this._metaCache) {
-        // Rebuild the REST-layer merge. Only runs when _restMeta changes.
-        const restMeta = this._restMeta ?? {};
+        // Rebuild the spec-meta merge. Only runs when _specMeta changes.
+        const restMeta = this._specMeta ?? {};
         // REST cache is the base; getSelfPath overlays field by field.
         // For object-valued fields (e.g. displayUnits), merge one level deeper so
         // REST cache fills any members that getSelfPath omits due to the known bug.
@@ -682,7 +666,7 @@ class MessageHandler {
       }
       return { id: this.id, path: this.path, idlePeriod: this.idlePeriod, ...this._metaCache };
     } catch (e) {
-      return { id: this.id, path: this.path, idlePeriod: this.idlePeriod, ...(this._restMeta ?? {}) };
+      return { id: this.id, path: this.path, idlePeriod: this.idlePeriod, ...(this._specMeta ?? {}) };
     }
   }
 
@@ -695,7 +679,7 @@ class MessageHandler {
     return {
       id: this.id,
       subscribed: this.subscribed,
-      pathKnown: this._restMeta !== null,
+      pathKnown: this._specMeta !== null,
       hasDelta: this._ready,
       isStale: this.stale,
       stalenessDetection: this._stalenessDetection,
