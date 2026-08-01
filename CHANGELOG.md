@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- `MessageHandler._resetIdleTimer()`: `_stale` is now cleared unconditionally on every data delivery, matching the existing behaviour of `MessageSmoother._resetIdleTimer()`. Previously the flag was only cleared inside the `if (this._idleTimer)` guard, so the very first delivery after `stalenessDetection = true` was explicitly set (with no prior data or timer) left `_stale = true`, causing `Polar.ready` to return `false` and silencing `PolarSmoother.sample()` for that entire update cycle.
+- `createSmoothedPolar()`: `PolarSmoother` is now constructed and `polar.onChange` is wired before `polar.subscribe()` is called. Previously the subscribe call ran first, so any bootstrap-snapshot delivery triggered `processChanges()` with `polar.onChange === null`, causing the smoother to miss the initial cached value entirely.
+
+---
+
 ## [3.0.1] — 2026-07-23
 
 ### Fixed

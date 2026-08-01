@@ -824,9 +824,9 @@ function createSmoothedPolar({
   polar.setAngleRange(angleRange);
   polar.setMeta(meta);
   if (magnitudeThreshold !== null) polar.configureFallbackAngle(magnitudeThreshold);
-  if (subscribe) polar.subscribe(true, true);
   const smoother = new PolarSmoother(polar, SmootherClass, smootherOptions);
   polar.onChange = () => { smoother.sample(); };
+  if (subscribe) polar.subscribe(true, true);
   return smoother;
 }
 

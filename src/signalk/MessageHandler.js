@@ -588,13 +588,11 @@ class MessageHandler {
    */
   _resetIdleTimer() {
     if (!this._stalenessDetection) return;
-    if (this._idleTimer) {
-      clearTimeout(this._idleTimer);
-      if (this._stale) {
-        this._app.debug(`Data received for ${this.path}, clearing stale state.`);
-      }
-      this._stale = false;
+    if (this._idleTimer) clearTimeout(this._idleTimer);
+    if (this._stale) {
+      this._app.debug(`Data received for ${this.path}, clearing stale state.`);
     }
+    this._stale = false;
     this._idleTimer = setTimeout(() => {
       this._app.debug(`No data for ${this.path}`);
       this._stale = true;
