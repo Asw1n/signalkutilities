@@ -297,8 +297,24 @@ class MessageSmoother {
   }
 }
 
+// Lifecycle states: subscription wiring
+const INACTIVE = 'INACTIVE';
+const ACTIVE   = 'ACTIVE';
+
+// Value status: freshness of the last received value
+const ABSENT = 'ABSENT'; // no value ever received, or explicitly cleared
+const FRESH  = 'FRESH';  // value received within idlePeriod
+const STALE  = 'STALE';  // idlePeriod has elapsed since last delivery
+
 /**
  * Handles subscription to a Signal K path, tracks value, frequency, and staleness.
+ *
+ * State model — two orthogonal dimensions:
+ *   Lifecycle:    INACTIVE (not subscribed) | ACTIVE (subscribed)
+ *   Value status: ABSENT (no data) | FRESH (data within idlePeriod) | STALE (idlePeriod elapsed)
+ *
+ *   ready = ACTIVE && FRESH
+ *
  * @class
  */
 class MessageHandler {
@@ -316,20 +332,20 @@ class MessageHandler {
     this._pluginId = pluginId;
 
     this._value = null;
-    this._ready = false;
-    this.timestamp = null;
+    this._lifecycle = INACTIVE;   // subscription wiring state
+    this._valueStatus = ABSENT;   // value freshness state
+    this.timestamp = null;        // Date.now() of last delivery; used to compute freshness
     this.frequency = null;
     this.freqAlpha = 0.2;
     this.onChange = null;
-    this.subscribed = false;
     this.n = 0;
-    this.idlePeriod = 4000; // ms
-    this._idleTimer = null;
+    this._idlePeriod = 4000; // ms — window within which a delivered value counts as FRESH
+    this._idleTimer = null; // armed when ACTIVE + onIdle set; fires onIdle callback when subscription goes quiet
+    this._onIdle = null;    // optional: called once when ACTIVE and no delivery for idlePeriod ms
     this._path="";
     this._unsubscribes = [];      // holds unsubscribe fns pushed by subscriptionmanager
     this._specMeta = null;
     this._metaCache = null;
-    this._stale = false;
     this._stalenessDetection = true;
     this._subscribeOptions = { excludeSelf: true };
   }
@@ -348,7 +364,7 @@ class MessageHandler {
 
   set value(v) {
     this._value = v;
-    this._ready = true;
+    this._valueStatus = FRESH;
   }
 
   /**
@@ -358,8 +374,16 @@ class MessageHandler {
    * @returns {this}
    */
   invalidate() {
-    this._ready = false;
+    this._valueStatus = ABSENT;
     return this;
+  }
+
+  /**
+   * Returns true when the subscription is active.
+   * @returns {boolean}
+   */
+  get subscribed() {
+    return this._lifecycle === ACTIVE;
   }
 
   set path(newPath) {
@@ -386,6 +410,29 @@ class MessageHandler {
   }
 
   /**
+   * Called once when the subscription is ACTIVE and no delivery has arrived for idlePeriod ms.
+   * Restarted by subscribe() and by every incoming delta.
+   * Set to null to disable.
+   */
+  get onIdle() {
+    return this._onIdle;
+  }
+
+  set onIdle(fn) {
+    this._onIdle = fn;
+    this._armIdleTimer();
+  }
+
+  get idlePeriod() {
+    return this._idlePeriod;
+  }
+
+  set idlePeriod(ms) {
+    this._idlePeriod = ms;
+    this._armIdleTimer();
+  }
+
+  /**
    * Configures the path and subscription options for this handler.
    * @param {string} path - The Signal K path to subscribe to.
    * @param {Object} [subscribeOptions={ excludeSelf: true }] - Options passed to the subscription manager.
@@ -408,7 +455,9 @@ class MessageHandler {
 
 
   /**
-   * Terminates the handler, unsubscribes and clears timers.
+   * Terminates the handler: moves lifecycle to INACTIVE and releases the subscription.
+   * Value status is preserved — the last received value (FRESH/STALE/ABSENT) is retained
+   * so callers can still read it after stop.
    * @param {boolean} [clearCallback=true] - If false, preserves _onChange (used for internal resubscribes).
    */
   terminate(clearCallback = true) {
@@ -420,8 +469,7 @@ class MessageHandler {
     // Release subscriptionmanager subscription
     this._unsubscribes.forEach(fn => fn());
     this._unsubscribes = [];
-    this.subscribed = false;
-    this._stale = false;
+    this._lifecycle = INACTIVE;
     return null;
   }
 
@@ -498,18 +546,21 @@ class MessageHandler {
 
     if (!path || path === "") {
       app.debug(`${this.id} is trying to subscribe to an empty path, subscription aborted`);
-      this._stale = true;
+      // No value received → treat as STALE so callers know it's not working
+      this._valueStatus = STALE;
       return;
     }
 
     app.debug(`Subscribing to ${path}`);
+    // Cancel any pending idle-debug timer from a previous subscription
     if (this._idleTimer) {
       clearTimeout(this._idleTimer);
-      this._stale = false;
+      this._idleTimer = null;
     }
 
     this._subscribeViaManager(path);
-    this.subscribed = true;
+    this._lifecycle = ACTIVE;
+    this._armIdleTimer();
     return this;
   }
 
@@ -530,7 +581,7 @@ class MessageHandler {
             for (const entry of update.values) {
               if (path === entry.path) {
                 this._value = entry.value;
-                this._ready = true;
+                this._valueStatus = FRESH;
                 this.updateFrequency();
                 found = true;
               }
@@ -538,7 +589,7 @@ class MessageHandler {
           }
         });
         if (found) {
-          this._resetIdleTimer();
+          this._armIdleTimer();
           if (typeof this._onChange === 'function') {
             this._onChange();
           }
@@ -553,50 +604,40 @@ class MessageHandler {
 
   set stalenessDetection(val) {
     this._stalenessDetection = val;
-    if (!val) {
-      if (this._idleTimer) {
-        clearTimeout(this._idleTimer);
-        this._idleTimer = null;
-      }
-      this._stale = false;
-    } else if (!this._idleTimer) {
-      // Re-enabling: evaluate immediately — don't wait for next delta
-      if (this.timestamp === null) {
-        this._stale = true;
-      } else {
-        const age = Date.now() - this.timestamp;
-        if (age >= this.idlePeriod) {
-          this._stale = true;
-        } else {
-          this._stale = false;
-          this._idleTimer = setTimeout(() => {
-            this._app.debug(`No data for ${this.path}`);
-            this._stale = true;
-          }, this.idlePeriod - age);
-        }
-      }
-    }
-  }
-
-  get stale() {
-    return this._stalenessDetection ? this._stale : false;
+    this._armIdleTimer();
   }
 
   /**
-   * Resets the idle timer for staleness detection.
+   * Computed staleness: true when stalenessDetection is enabled and no delivery
+   * has arrived within idlePeriod ms.
+   * Value status ABSENT is never reported as stale — it is simply "no data yet".
+   * @returns {boolean}
+   */
+  get stale() {
+    if (!this._stalenessDetection) return false;
+    if (this._valueStatus === ABSENT) return false;
+    if (this.timestamp === null) return true;
+    return Date.now() - this.timestamp >= this.idlePeriod;
+  }
+
+  /**
+   * Arms the idle timer. When it fires (after idlePeriod ms of no delivery while ACTIVE),
+   * emits a debug log and calls onIdle. Single fire — does not reschedule.
+   * Restarted by subscribe() and by every incoming delta.
+   * No-ops (and cancels any pending timer) when any condition is not met:
+   *   stalenessDetection disabled | lifecycle INACTIVE | onIdle not set | idlePeriod <= 0.
    * @private
    */
-  _resetIdleTimer() {
-    if (!this._stalenessDetection) return;
-    if (this._idleTimer) clearTimeout(this._idleTimer);
-    if (this._stale) {
-      this._app.debug(`Data received for ${this.path}, clearing stale state.`);
-    }
-    this._stale = false;
+  _armIdleTimer() {
+    if (this._idleTimer) { clearTimeout(this._idleTimer); this._idleTimer = null; }
+    if (!this._stalenessDetection || this._lifecycle !== ACTIVE || !this._onIdle || !(this._idlePeriod > 0)) return;
     this._idleTimer = setTimeout(() => {
+      this._idleTimer = null;
       this._app.debug(`No data for ${this.path}`);
-      this._stale = true;
-    }, this.idlePeriod);
+      if (this._lifecycle === ACTIVE && typeof this._onIdle === 'function') {
+        this._onIdle();
+      }
+    }, this._idlePeriod);
   }
 
   /**
@@ -677,8 +718,10 @@ class MessageHandler {
     return {
       id: this.id,
       subscribed: this.subscribed,
+      lifecycle: this._lifecycle,
+      valueStatus: this._valueStatus,
       pathKnown: this._specMeta !== null,
-      hasDelta: this._ready,
+      hasDelta: this._valueStatus !== ABSENT,
       isStale: this.stale,
       stalenessDetection: this._stalenessDetection,
       lastDelta,
@@ -690,14 +733,18 @@ class MessageHandler {
 
   /**
    * Returns true when this handler holds a currently valid value.
-   * For subscribed handlers this is set by incoming SK data and cleared on staleness.
-   * For write-only/derived handlers this is set by assignment to value and cleared by invalidate().
-   * A handler with no path and no subscription is a constant/placeholder contributor
-   * (e.g. a fixed angle of 0 when only magnitude is used) and is always ready.
+   * ready = ACTIVE lifecycle AND FRESH value status.
+   *
+   * Exception: when stalenessDetection is disabled (constant/placeholder contributors
+   * such as a fixed angle of 0), lifecycle is irrelevant — ready as soon as any value
+   * has been assigned.
    * @returns {boolean}
    */
   get ready() {
-    return !this.stale && this._ready;
+    if (!this._stalenessDetection) {
+      return this._valueStatus !== ABSENT;
+    }
+    return this._lifecycle === ACTIVE && !this.stale && this._valueStatus !== ABSENT;
   }
 
   /**

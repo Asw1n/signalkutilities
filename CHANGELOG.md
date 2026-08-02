@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `MessageHandler.onIdle` — optional callback fired once when a subscription is ACTIVE and no delivery has arrived for `idlePeriod` ms. Null by default. Restarted by `subscribe()` and by every incoming delta. The timer is only armed when all conditions are met: `stalenessDetection` enabled, lifecycle ACTIVE, `onIdle` set, and `idlePeriod > 0`. Setting `onIdle` or changing `idlePeriod` while ACTIVE arms the timer immediately.
+- `MessageHandler.idlePeriod` is now a getter/setter. Assigning a new value rearms the idle timer immediately if conditions are met.
+
+### Changed
+- `MessageHandler` internal state model refactored to two orthogonal dimensions: **Lifecycle** (`INACTIVE` / `ACTIVE`) and **Value Status** (`ABSENT` / `FRESH` / `STALE`). The three overlapping boolean flags (`subscribed`, `_ready`, `_stale`) have been replaced.
+  - `subscribed` is now a derived read-only getter (`lifecycle === ACTIVE`).
+  - Staleness is **computed on demand** from `timestamp + idlePeriod > now` — no timer flips a flag.
+  - `terminate()` moves to INACTIVE but preserves value status; the last value remains readable.
+  - `subscribe()` moves to ACTIVE without resetting value status.
+  - `ready` = ACTIVE + FRESH. Exception: when `stalenessDetection` is disabled (constant/placeholder contributors), lifecycle is not checked.
+  - `state` now exposes `lifecycle` and `valueStatus` fields for richer diagnostics.
+- `MessageHandler._scheduleStaleDebug()` and `_resetIdleTimer()` replaced by `_armIdleTimer()`, which manages both the debug log and the `onIdle` callback in one place.
+
 ### Fixed
 - `MessageHandler._resetIdleTimer()`: `_stale` is now cleared unconditionally on every data delivery, matching the existing behaviour of `MessageSmoother._resetIdleTimer()`. Previously the flag was only cleared inside the `if (this._idleTimer)` guard, so the very first delivery after `stalenessDetection = true` was explicitly set (with no prior data or timer) left `_stale = true`, causing `Polar.ready` to return `false` and silencing `PolarSmoother.sample()` for that entire update cycle.
 - `createSmoothedPolar()`: `PolarSmoother` is now constructed and `polar.onChange` is wired before `polar.subscribe()` is called. Previously the subscribe call ran first, so any bootstrap-snapshot delivery triggered `processChanges()` with `polar.onChange === null`, causing the smoother to miss the initial cached value entirely.
