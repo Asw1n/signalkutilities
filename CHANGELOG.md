@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `PolarSmoother.polarValue` now returns `null` when `!this.ready` (i.e. no samples have been received yet, or data has gone stale). Previously, the uninitialized smoother `x`/`y` estimates of `0` caused `polarValue` to return `{ magnitude: 0, angle: 0 }`, making callers unable to distinguish "no data" from a genuine zero reading.
+
 ### Added
 - `MessageHandler.onIdle` — optional callback fired once when a subscription is ACTIVE and no delivery has arrived for `idlePeriod` ms. Null by default. Restarted by `subscribe()` and by every incoming delta. The timer is only armed when all conditions are met: `stalenessDetection` enabled, lifecycle ACTIVE, `onIdle` set, and `idlePeriod > 0`. Setting `onIdle` or changing `idlePeriod` while ACTIVE arms the timer immediately.
 - `MessageHandler.idlePeriod` is now a getter/setter. Assigning a new value rearms the idle timer immediately if conditions are met.

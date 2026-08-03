@@ -591,6 +591,7 @@ class PolarSmoother {
   }
 
   get polarValue() {
+    if (!this.ready) return null;
     return {
       magnitude: this.magnitude,
       angle: this.angle
