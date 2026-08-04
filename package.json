@@ -1,6 +1,6 @@
 {
   "name": "signalkutilities",
-  "version": "3.0.1",
+  "version": "3.1.0",
   "description": "Utilities for Signal K plugin development: message handling, polar vector maths, statistical smoothing, and web reporting",
   "main": "index.js",
   "scripts": {
@@ -33,4 +33,3 @@
     "src/web/**"
   ]
 }
-
