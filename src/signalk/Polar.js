@@ -105,9 +105,14 @@ class Polar {
 
 
 
+  unsubscribe() {
+    this.magnitudeHandler.unsubscribe();
+    this.angleHandler.unsubscribe();
+  }
+
   terminate() {
     this.magnitudeHandler.terminate();
-    this.angleHandler.terminate(); 
+    this.angleHandler.terminate();
     return null;
   }
 
@@ -430,6 +435,14 @@ class PolarSmoother {
     if (this._idleTimer) clearTimeout(this._idleTimer);
     this._stale = false;
     this._idleTimer = setTimeout(() => { this._stale = true; }, this.idlePeriod);
+  }
+
+  unsubscribe() {
+    if (this._idleTimer) {
+      clearTimeout(this._idleTimer);
+      this._idleTimer = null;
+    }
+    return this.polar.unsubscribe();
   }
 
   terminate() {

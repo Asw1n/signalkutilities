@@ -63,6 +63,18 @@ class MessageSmoother {
   }
 
   /**
+   * Releases the underlying handler's subscription without clearing callbacks.
+   * @returns {void}
+   */
+  unsubscribe() {
+    if (this._idleTimer) {
+      clearTimeout(this._idleTimer);
+      this._idleTimer = null;
+    }
+    return this.handler.unsubscribe();
+  }
+
+  /**
    * Terminates the underlying handler and clears the idle timer.
    * @returns {null}
    */
@@ -339,7 +351,7 @@ class MessageHandler {
     this.freqAlpha = 0.2;
     this.onChange = null;
     this.n = 0;
-    this._idlePeriod = 4000; // ms — window within which a delivered value counts as FRESH
+    this._idlePeriod = 60000; // ms — window within which a delivered value counts as FRESH
     this._idleTimer = null; // armed when ACTIVE + onIdle set; fires onIdle callback when subscription goes quiet
     this._onIdle = null;    // optional: called once when ACTIVE and no delivery for idlePeriod ms
     this._path="";
@@ -455,21 +467,32 @@ class MessageHandler {
 
 
   /**
-   * Terminates the handler: moves lifecycle to INACTIVE and releases the subscription.
-   * Value status is preserved — the last received value (FRESH/STALE/ABSENT) is retained
-   * so callers can still read it after stop.
-   * @param {boolean} [clearCallback=true] - If false, preserves _onChange (used for internal resubscribes).
+   * Releases the current subscription without clearing callbacks or metadata.
+   * Moves lifecycle to INACTIVE and cancels the idle timer.
+   * Call subscribe() afterwards to reconnect.
    */
-  terminate(clearCallback = true) {
-    if (clearCallback) this._onChange = null;
+  unsubscribe() {
     if (this._idleTimer) {
       clearTimeout(this._idleTimer);
       this._idleTimer = null;
     }
-    // Release subscriptionmanager subscription
     this._unsubscribes.forEach(fn => fn());
     this._unsubscribes = [];
     this._lifecycle = INACTIVE;
+  }
+
+  /**
+   * Terminates the handler: moves lifecycle to INACTIVE and releases the subscription.
+   * Value status is preserved — the last received value (FRESH/STALE/ABSENT) is retained
+   * so callers can still read it after stop.
+   * @param {boolean} [clearCallback=true] - If false, preserves _onChange and _onIdle (used for internal resubscribes).
+   */
+  terminate(clearCallback = true) {
+    if (clearCallback) {
+      this._onChange = null;
+      this._onIdle = null;
+    }
+    this.unsubscribe();
     return null;
   }
 
