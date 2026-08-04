@@ -2,6 +2,8 @@
 
 Utilities for Signal K plugin development. Covers subscription and value tracking for individual paths, polar vector maths (add, rotate, scale), statistical smoothing with three smoother types, correct wraparound-safe angle smoothing, and a web-facing Reporter that aggregates state across all tracked objects.
 
+The current API also includes explicit lifecycle events (`onDelta`, `onIdle`, `onStale`) and static `clear()` helpers so plugins can manage idle/stale subscriptions and publish `null` values cleanly when outputs are disabled or the plugin stops.
+
 ## Installation
 
 ```
@@ -50,11 +52,14 @@ const { MessageHandler } = require('signalkutilities');
 
 const handler = new MessageHandler(app, pluginId, 'boatSpeed');
 handler.configure('navigation.speedOverGround');
+handler.idlePeriod = 10000;
+handler.stalePeriod = 15000;
+handler.onDelta = () => {};
 handler.subscribe();
 
 // later
 handler.value;       // latest numeric value
-handler.stale;       // true if no update within idlePeriod
+handler.stale;       // true after stalePeriod elapses without a fresh delta
 handler.frequency;   // Hz
 handler.meta;        // { id, path, displayName, displayUnits, ... }
 handler.state;       // { id, isStale, frequency, ... }
@@ -75,8 +80,8 @@ const { MessageHandler, MessageSmoother, ExponentialSmoother } = require('signal
 const handler = new MessageHandler(app, pluginId, 'boatSpeed');
 handler.configure('navigation.speedOverGround');
 const smoother = new MessageSmoother(handler, ExponentialSmoother, { timeConstant: 2 });
-handler.subscribe();
-handler.onChange = () => smoother.sample();
+smoother.onDelta = () => {};
+smoother.subscribe();
 
 smoother.value;          // smoothed value
 smoother.standardError;  // sqrt of variance
@@ -97,7 +102,8 @@ const smoother = createSmoothedHandler({
   app, pluginId,
   subscribe: true,
   SmootherClass: ExponentialSmoother,
-  smootherOptions: { timeConstant: 2 }
+  smootherOptions: { timeConstant: 2 },
+  onDelta: () => {}
 });
 ```
 
@@ -133,6 +139,13 @@ wind.report();    // { id, pathMagnitude, pathAngle, x, y, magnitude, angle, tra
 // Static send — writes smoothed values back to SK
 PolarSmoother.send(app, pluginId, [wind]);
 ```
+
+Event configuration is part of the subscription contract. Configure `path`, subscribe options,
+`onDelta`, `onIdle`, `onStale`, `idlePeriod`, and `stalePeriod` before `subscribe()`.
+To change any of those while the plugin is running, do an explicit `unsubscribe()`, apply the
+change, then `subscribe()` again.
+
+By default, `idlePeriod` is 60 seconds and `stalePeriod` is 4 seconds.
 
 For unsmoothed use:
 

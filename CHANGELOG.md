@@ -11,22 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `PolarSmoother.polarValue` now returns `null` when `!this.ready` (i.e. no samples have been received yet, or data has gone stale). Previously, the uninitialized smoother `x`/`y` estimates of `0` caused `polarValue` to return `{ magnitude: 0, angle: 0 }`, making callers unable to distinguish "no data" from a genuine zero reading.
 
 ### Added
-- `MessageHandler.onIdle` — optional callback fired once when a subscription is ACTIVE and no delivery has arrived for `idlePeriod` ms. Null by default. Restarted by `subscribe()` and by every incoming delta. The timer is only armed when all conditions are met: `stalenessDetection` enabled, lifecycle ACTIVE, `onIdle` set, and `idlePeriod > 0`. Setting `onIdle` or changing `idlePeriod` while ACTIVE arms the timer immediately.
-- `MessageHandler.idlePeriod` is now a getter/setter. Assigning a new value rearms the idle timer immediately if conditions are met.
+- `onDelta`, `onIdle`, and `onStale` are now first-class lifecycle events on `MessageHandler`, `Polar`, `MessageSmoother`, and `PolarSmoother`.
+- The new `clear()` helpers (`MessageHandler.clear`, `Polar.clear`, `PolarSmoother.clear`) make it straightforward to write `null` to output paths when a plugin is stopped or a feature is toggled off.
+- `stalePeriod` is now separate from `idlePeriod`, so absence and staleness use independent wait periods.
 
 ### Changed
-- `MessageHandler` internal state model refactored to two orthogonal dimensions: **Lifecycle** (`INACTIVE` / `ACTIVE`) and **Value Status** (`ABSENT` / `FRESH` / `STALE`). The three overlapping boolean flags (`subscribed`, `_ready`, `_stale`) have been replaced.
-  - `subscribed` is now a derived read-only getter (`lifecycle === ACTIVE`).
-  - Staleness is **computed on demand** from `timestamp + idlePeriod > now` — no timer flips a flag.
-  - `terminate()` moves to INACTIVE but preserves value status; the last value remains readable.
-  - `subscribe()` moves to ACTIVE without resetting value status.
-  - `ready` = ACTIVE + FRESH. Exception: when `stalenessDetection` is disabled (constant/placeholder contributors), lifecycle is not checked.
-  - `state` now exposes `lifecycle` and `valueStatus` fields for richer diagnostics.
-- `MessageHandler._scheduleStaleDebug()` and `_resetIdleTimer()` replaced by `_armIdleTimer()`, which manages both the debug log and the `onIdle` callback in one place.
+- Subscription event configuration is now fixed for the duration of an ACTIVE lifecycle. Paths, subscribe options, `idlePeriod`, `stalePeriod`, and public event handlers must be configured before `subscribe()` and changed only after `unsubscribe()` or `terminate()`.
+- `onChange` remains as a compatibility alias for `onDelta`, but wrapper propagation no longer depends on mutating child public callbacks.
+- `MessageHandler`, `Polar`, `MessageSmoother`, and `PolarSmoother` now each own their own lifecycle state (`INACTIVE` / `ACTIVE`) and value status (`ABSENT` / `FRESH` / `STALE`) instead of borrowing stale semantics from wrapped objects.
+- Wrapper factory helpers now accept event callbacks and timing options up front, so wrapper subscriptions can start with a complete event contract.
 
 ### Fixed
-- `MessageHandler._resetIdleTimer()`: `_stale` is now cleared unconditionally on every data delivery, matching the existing behaviour of `MessageSmoother._resetIdleTimer()`. Previously the flag was only cleared inside the `if (this._idleTimer)` guard, so the very first delivery after `stalenessDetection = true` was explicitly set (with no prior data or timer) left `_stale = true`, causing `Polar.ready` to return `false` and silencing `PolarSmoother.sample()` for that entire update cycle.
-- `createSmoothedPolar()`: `PolarSmoother` is now constructed and `polar.onChange` is wired before `polar.subscribe()` is called. Previously the subscribe call ran first, so any bootstrap-snapshot delivery triggered `processChanges()` with `polar.onChange === null`, causing the smoother to miss the initial cached value entirely.
+- Changing a live path now requires an explicit `unsubscribe() -> set path -> subscribe()` cycle instead of an implicit active resubscribe hidden inside the path setter.
 
 ---
 

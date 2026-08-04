@@ -2,21 +2,23 @@
 
 const { MovingAverageSmoother, ExponentialSmoother, KalmanSmoother } = require('./smoothers');
 
-/**
- * MessageSmoother wraps a MessageHandler and applies a smoothing algorithm
- * using a specified Smoother class (MovingAverageSmoother, ExponentialSmoother, KalmanSmoother).
- * It supports both scalar and object values, automatically creating smoothers for numeric properties in objects.
- * The MessageSmoother passes on configuration changes to the underlying MessageHandler.
- * 
- **/
+const INACTIVE = 'INACTIVE';
+const ACTIVE = 'ACTIVE';
+
+const ABSENT = 'ABSENT';
+const FRESH = 'FRESH';
+const STALE = 'STALE';
+
+const DEFAULT_IDLE_PERIOD = 60000;
+const DEFAULT_STALE_PERIOD = 4000;
+
+function clearTimer(timer) {
+  if (timer) clearTimeout(timer);
+  return null;
+}
 
 class MessageSmoother {
-  /**
-   * @param {MessageHandler} handler - The underlying MessageHandler instance.
-   * @param {Function} [SmootherClass=ExponentialSmoother] - The smoother class to use.
-   * @param {Object} [smootherOptions={}] - Options to pass to the smoother.
-   */
-  constructor(handler, SmootherClass = ExponentialSmoother, smootherOptions = {}) {
+  constructor(handler, SmootherClass = ExponentialSmoother, smootherOptions = {}, eventOptions = {}) {
     this.id = handler.id + '.smoothed';
     this.handler = handler;
     this.SmootherClass = SmootherClass;
@@ -26,17 +28,71 @@ class MessageSmoother {
     this.n = 0;
     this._isObject = false;
     this._propertyKeys = null;
-    this.onChange = null;
-    this._stale = true;
+    this._lifecycle = handler.subscribed ? ACTIVE : INACTIVE;
+    this._valueStatus = ABSENT;
+    this._stale = false;
     this._idleTimer = null;
-    this.idlePeriod = this._derivedIdlePeriod(smootherOptions);
-    this._stalenessDetection = true;
+    this._staleTimer = null;
+    this._idlePeriod = eventOptions.idlePeriod ?? DEFAULT_IDLE_PERIOD;
+    this._stalePeriod = eventOptions.stalePeriod ?? this._derivedStalePeriod(smootherOptions);
+    this._onDelta = eventOptions.onDelta ?? null;
+    this._onIdle = eventOptions.onIdle ?? null;
+    this._onStale = eventOptions.onStale ?? null;
+    this._handleSourceDelta = () => { this.sample(); };
+    this.handler.addDeltaListener(this._handleSourceDelta);
+    if (this.handler.subscribed) {
+      this._activateLifecycle();
+    }
   }
 
-  /**
-   * Resets the smoother(s) and determines the value type (scalar or object).
-   * Initializes appropriate smoother(s) for the value type.
-   */
+  _ensureInactive(field) {
+    if (this.subscribed) {
+      throw new Error(`Cannot modify ${field} while subscription is ACTIVE for ${this.id}`);
+    }
+  }
+
+  _clearEventTimers() {
+    this._idleTimer = clearTimer(this._idleTimer);
+    this._staleTimer = clearTimer(this._staleTimer);
+  }
+
+  _armIdleTimer() {
+    this._idleTimer = clearTimer(this._idleTimer);
+    if (this._lifecycle !== ACTIVE || typeof this._onIdle !== 'function' || !(this._idlePeriod > 0)) return;
+    this._idleTimer = setTimeout(() => {
+      this._idleTimer = null;
+      if (this._lifecycle === ACTIVE && this._valueStatus === ABSENT && typeof this._onIdle === 'function') {
+        this._onIdle();
+      }
+    }, this._idlePeriod);
+  }
+
+  _armStaleTimer() {
+    this._staleTimer = clearTimer(this._staleTimer);
+    if (this._lifecycle !== ACTIVE || typeof this._onStale !== 'function' || !(this._stalePeriod > 0)) return;
+    this._staleTimer = setTimeout(() => {
+      this._staleTimer = null;
+      if (this._lifecycle !== ACTIVE || this._stale) return;
+      this._stale = true;
+      if (this._valueStatus !== ABSENT) this._valueStatus = STALE;
+      if (typeof this._onStale === 'function') this._onStale();
+    }, this._stalePeriod);
+  }
+
+  _activateLifecycle() {
+    this._lifecycle = ACTIVE;
+    this._valueStatus = ABSENT;
+    this._stale = false;
+    this.reset();
+    this._armIdleTimer();
+    this._armStaleTimer();
+  }
+
+  _deactivateLifecycle() {
+    this._lifecycle = INACTIVE;
+    this._clearEventTimers();
+  }
+
   reset() {
     this.timestamp = null;
     this.n = 0;
@@ -57,97 +113,110 @@ class MessageSmoother {
       for (const key of this._propertyKeys) {
         this.smoother[key] = new this.SmootherClass(this.smootherOptions);
       }
-    } else {
-      this.smoother = null; // No valid value yet
     }
   }
 
-  /**
-   * Releases the underlying handler's subscription without clearing callbacks.
-   * @returns {void}
-   */
-  unsubscribe() {
-    if (this._idleTimer) {
-      clearTimeout(this._idleTimer);
-      this._idleTimer = null;
+  subscribe() {
+    this.handler.subscribe();
+    if (this.handler.subscribed) {
+      this._activateLifecycle();
+    } else {
+      this._deactivateLifecycle();
     }
+    return this;
+  }
+
+  unsubscribe() {
+    this._deactivateLifecycle();
     return this.handler.unsubscribe();
   }
 
-  /**
-   * Terminates the underlying handler and clears the idle timer.
-   * @returns {null}
-   */
   terminate(clearCallback = true) {
-    if (this._idleTimer) {
-      clearTimeout(this._idleTimer);
-      this._idleTimer = null;
+    this._deactivateLifecycle();
+    this.handler.removeDeltaListener(this._handleSourceDelta);
+    if (clearCallback) {
+      this._onDelta = null;
+      this._onIdle = null;
+      this._onStale = null;
     }
     return this.handler.terminate(clearCallback);
   }
 
-  _derivedIdlePeriod(opts) {
-    const MIN_IDLE = 5000;
-    if (typeof opts.timeConstant === 'number') return Math.max(opts.timeConstant * 3000, MIN_IDLE);
-    if (typeof opts.tau === 'number') return Math.max(opts.tau * 3000, MIN_IDLE);
-    if (typeof opts.timeSpan === 'number') return Math.max(opts.timeSpan * 3000, MIN_IDLE);
-    // KalmanSmoother (processVariance/measurementVariance/steadyState) has no
-    // time-based parameter — use a sensible default.
-    return 10000;
+  _derivedStalePeriod(opts) {
+    const MIN_PERIOD = DEFAULT_STALE_PERIOD;
+    if (typeof opts.timeConstant === 'number') return Math.max(opts.timeConstant * 3000, MIN_PERIOD);
+    if (typeof opts.tau === 'number') return Math.max(opts.tau * 3000, MIN_PERIOD);
+    if (typeof opts.timeSpan === 'number') return Math.max(opts.timeSpan * 3000, MIN_PERIOD);
+    return DEFAULT_STALE_PERIOD;
   }
 
-  get stalenessDetection() {
-    return this._stalenessDetection;
+  get subscribed() {
+    return this.handler.subscribed;
   }
 
-  set stalenessDetection(val) {
-    this._stalenessDetection = val;
-    this.handler.stalenessDetection = val;
-    if (!val) {
-      if (this._idleTimer) {
-        clearTimeout(this._idleTimer);
-        this._idleTimer = null;
-      }
-      this._stale = false;
-    } else if (!this._idleTimer) {
-      // Re-enabling: evaluate immediately — don't wait for next delta
-      if (this.timestamp === null) {
-        this._stale = true;
-      } else {
-        const age = Date.now() - this.timestamp;
-        if (age >= this.idlePeriod) {
-          this._stale = true;
-        } else {
-          this._stale = false;
-          this._idleTimer = setTimeout(() => { this._stale = true; }, this.idlePeriod - age);
-        }
-      }
-    }
+  get onDelta() {
+    return this._onDelta;
   }
 
-  _resetIdleTimer() {
-    if (!this._stalenessDetection) return;
-    if (this._idleTimer) clearTimeout(this._idleTimer);
-    this._stale = false;
-    this._idleTimer = setTimeout(() => { this._stale = true; }, this.idlePeriod);
+  set onDelta(fn) {
+    this._ensureInactive('onDelta');
+    this._onDelta = fn;
   }
 
-  /**
-   * Adds a new sample from the handler to the smoother(s).
-   * @returns {MessageSmoother}
-   */
+  get onChange() {
+    return this.onDelta;
+  }
+
+  set onChange(fn) {
+    this.onDelta = fn;
+  }
+
+  get onIdle() {
+    return this._onIdle;
+  }
+
+  set onIdle(fn) {
+    this._ensureInactive('onIdle');
+    this._onIdle = fn;
+  }
+
+  get onStale() {
+    return this._onStale;
+  }
+
+  set onStale(fn) {
+    this._ensureInactive('onStale');
+    this._onStale = fn;
+  }
+
+  get idlePeriod() {
+    return this._idlePeriod;
+  }
+
+  set idlePeriod(ms) {
+    this._ensureInactive('idlePeriod');
+    this._idlePeriod = ms;
+  }
+
+  get stalePeriod() {
+    return this._stalePeriod;
+  }
+
+  set stalePeriod(ms) {
+    this._ensureInactive('stalePeriod');
+    this._stalePeriod = ms;
+  }
+
   sample() {
     if (!this.handler.ready) return this;
-    if (this._stale) {
-      this.reset();
-    } else if (this.n === 0) {
+    if (this._stale || this.n === 0 || !this.smoother) {
       this.reset();
     }
     const now = Date.now();
     const handlerValue = this.handler.value;
     const handlerVariance = this.handler.variance;
     if (!this.smoother) {
-      this.reset();
+      return this;
     }
     if (!this._isObject) {
       this.smoother.add(handlerValue, handlerVariance);
@@ -158,17 +227,16 @@ class MessageSmoother {
     }
     this.timestamp = now;
     this.n++;
-    this._resetIdleTimer();
-    if (typeof this.onChange === 'function') {
-      this.onChange();
+    this._valueStatus = FRESH;
+    this._stale = false;
+    this._idleTimer = clearTimer(this._idleTimer);
+    this._armStaleTimer();
+    if (typeof this._onDelta === 'function') {
+      this._onDelta();
     }
     return this;
   }
 
-  /**
-   * Gets the current smoothed value.
-   * @returns {number|Object|undefined}
-   */
   get value() {
     if (this._isObject && this.smoother) {
       const result = {};
@@ -180,10 +248,6 @@ class MessageSmoother {
     return this.smoother ? this.smoother.estimate : undefined;
   }
 
-  /**
-   * Gets the current variance estimate.
-   * @returns {number|Object|undefined}
-   */
   get variance() {
     if (this._isObject && this.smoother) {
       const result = {};
@@ -195,10 +259,6 @@ class MessageSmoother {
     return this.smoother ? this.smoother.variance : undefined;
   }
 
-  /**
-   * Gets the current standard error estimate.
-   * @returns {number|Object|undefined}
-   */
   get standardError() {
     if (this._isObject && this.smoother) {
       const result = {};
@@ -212,28 +272,14 @@ class MessageSmoother {
     return this.smoother ? this.smoother.standardError : undefined;
   }
 
-  /**
-   * Returns true if the underlying handler is stale.
-   * @returns {boolean}
-   */
   get stale() {
-    return this._stalenessDetection ? this._stale : false;
+    return this._stale;
   }
 
-  /**
-   * Returns true if the smoother has received at least one sample and is not stale.
-   * Stale is determined by the smoother's own idle timer, not the source's state.
-   * @returns {boolean}
-   */
   get ready() {
-    return this.n > 0 && !this.stale;
+    return this._valueStatus !== ABSENT && !this.stale;
   }
 
-  /**
-   * Updates smoother options and immediately applies them to the live smoother(s).
-   * Note: this resets the smoother state, losing accumulated history.
-   * @param {Object} opts - New options to pass to the smoother.
-   */
   setSmootherOptions(opts) {
     this.smootherOptions = opts;
     if (!this.smoother) return;
@@ -246,39 +292,32 @@ class MessageSmoother {
     }
   }
 
-  /**
-   * Replaces the smoother class and immediately recreates the live smoother(s).
-   * Note: this resets the smoother state, losing accumulated history.
-   * @param {Function} SmootherClass - The new smoother class to use.
-   */
   setSmootherClass(SmootherClass) {
     this.SmootherClass = SmootherClass;
     this.reset();
   }
 
-  /**
-   * Gets static metadata for this smoother and its underlying handler.
-   * SK meta is read lazily from the handler. Absent fields are not populated here —
-   * the webapp is responsible for fallback values.
-   * @returns {Object}
-   */
   get meta() {
-    return { id: this.id, ...this.handler.meta, smoother: { type: this.SmootherClass.name, ...this.smootherOptions } };
+    const { idlePeriod: _childIdlePeriod, stalePeriod: _childStalePeriod, ...handlerMeta } = this.handler.meta;
+    return {
+      id: this.id,
+      ...handlerMeta,
+      idlePeriod: this.idlePeriod,
+      stalePeriod: this.stalePeriod,
+      smoother: { type: this.SmootherClass.name, ...this.smootherOptions }
+    };
   }
 
-  /**
-   * Gets dynamic state for this smoother.
-   * @returns {Object}
-   */
   get state() {
     const lastDelta = this.timestamp;
     return {
       id: this.id,
+      subscribed: this.subscribed,
       ready: this.ready,
+      valueStatus: this._valueStatus,
       isStale: this.stale,
       hasDelta: this.n > 0,
       nSamples: this.n,
-      stalenessDetection: this._stalenessDetection,
       lastDelta,
       deltaAge: lastDelta ? Date.now() - lastDelta : null,
       frequency: this.handler.frequency,
@@ -286,10 +325,6 @@ class MessageSmoother {
     };
   }
 
-  /**
-   * Returns a summary object for reporting.
-   * @returns {Object}
-   */
   report() {
     return {
       id: this.id,
@@ -300,72 +335,96 @@ class MessageSmoother {
     };
   }
 
-  /**
-   * Gets the update frequency (Hz).
-   * @returns {number|null}
-   */
   get frequency() {
     return this.handler.frequency;
   }
 }
 
-// Lifecycle states: subscription wiring
-const INACTIVE = 'INACTIVE';
-const ACTIVE   = 'ACTIVE';
-
-// Value status: freshness of the last received value
-const ABSENT = 'ABSENT'; // no value ever received, or explicitly cleared
-const FRESH  = 'FRESH';  // value received within idlePeriod
-const STALE  = 'STALE';  // idlePeriod has elapsed since last delivery
-
-/**
- * Handles subscription to a Signal K path, tracks value, frequency, and staleness.
- *
- * State model — two orthogonal dimensions:
- *   Lifecycle:    INACTIVE (not subscribed) | ACTIVE (subscribed)
- *   Value status: ABSENT (no data) | FRESH (data within idlePeriod) | STALE (idlePeriod elapsed)
- *
- *   ready = ACTIVE && FRESH
- *
- * @class
- */
 class MessageHandler {
-  /**
-   * Constructs the messagehandler.
-   * @param {Object} app - The app instance.
-   * @param {string} pluginId - Plugin identifier.
-   * @param {string} id - Identifier for this handler.
-   */
-
   constructor(app, pluginId, id) {
-
     this._app = app;
     this._id = id;
     this._pluginId = pluginId;
 
     this._value = null;
-    this._lifecycle = INACTIVE;   // subscription wiring state
-    this._valueStatus = ABSENT;   // value freshness state
-    this.timestamp = null;        // Date.now() of last delivery; used to compute freshness
+    this._lifecycle = INACTIVE;
+    this._valueStatus = ABSENT;
+    this._stale = false;
+    this.timestamp = null;
     this.frequency = null;
     this.freqAlpha = 0.2;
-    this.onChange = null;
     this.n = 0;
-    this._idlePeriod = 60000; // ms — window within which a delivered value counts as FRESH
-    this._idleTimer = null; // armed when ACTIVE + onIdle set; fires onIdle callback when subscription goes quiet
-    this._onIdle = null;    // optional: called once when ACTIVE and no delivery for idlePeriod ms
-    this._path="";
-    this._unsubscribes = [];      // holds unsubscribe fns pushed by subscriptionmanager
+    this._idlePeriod = DEFAULT_IDLE_PERIOD;
+    this._stalePeriod = DEFAULT_STALE_PERIOD;
+    this._idleTimer = null;
+    this._staleTimer = null;
+    this._onDelta = null;
+    this._onIdle = null;
+    this._onStale = null;
+    this._path = '';
+    this._unsubscribes = [];
     this._specMeta = null;
     this._metaCache = null;
-    this._stalenessDetection = true;
     this._subscribeOptions = { excludeSelf: true };
+    this._deltaListeners = new Set();
   }
 
-  /**
-   * Gets the handler id.
-   * @returns {string}
-   */
+  _ensureInactive(field) {
+    if (this.subscribed) {
+      throw new Error(`Cannot modify ${field} while subscription is ACTIVE for ${this.id}`);
+    }
+  }
+
+  _clearEventTimers() {
+    this._idleTimer = clearTimer(this._idleTimer);
+    this._staleTimer = clearTimer(this._staleTimer);
+  }
+
+  _armIdleTimer() {
+    this._idleTimer = clearTimer(this._idleTimer);
+    if (this._lifecycle !== ACTIVE || typeof this._onIdle !== 'function' || !(this._idlePeriod > 0)) return;
+    this._idleTimer = setTimeout(() => {
+      this._idleTimer = null;
+      if (this._lifecycle === ACTIVE && this._valueStatus === ABSENT && typeof this._onIdle === 'function') {
+        this._app.debug(`No data for ${this.path}`);
+        this._onIdle();
+      }
+    }, this._idlePeriod);
+  }
+
+  _armStaleTimer() {
+    this._staleTimer = clearTimer(this._staleTimer);
+    if (this._lifecycle !== ACTIVE || typeof this._onStale !== 'function' || !(this._stalePeriod > 0)) return;
+    this._staleTimer = setTimeout(() => {
+      this._staleTimer = null;
+      if (this._lifecycle !== ACTIVE || this._stale) return;
+      this._stale = true;
+      if (this._valueStatus !== ABSENT) this._valueStatus = STALE;
+      if (typeof this._onStale === 'function') {
+        this._onStale();
+      }
+    }, this._stalePeriod);
+  }
+
+  _dispatchDelta() {
+    for (const listener of this._deltaListeners) {
+      listener();
+    }
+    if (typeof this._onDelta === 'function') {
+      this._onDelta();
+    }
+  }
+
+  addDeltaListener(fn) {
+    if (typeof fn === 'function') this._deltaListeners.add(fn);
+    return this;
+  }
+
+  removeDeltaListener(fn) {
+    this._deltaListeners.delete(fn);
+    return this;
+  }
+
   get id() {
     return this._id;
   }
@@ -377,62 +436,64 @@ class MessageHandler {
   set value(v) {
     this._value = v;
     this._valueStatus = FRESH;
+    this._stale = false;
   }
 
-  /**
-   * Marks this handler as having no valid value.
-   * Downstream consumers that check ready will treat it as unavailable
-   * until a successful value write occurs.
-   * @returns {this}
-   */
   invalidate() {
     this._valueStatus = ABSENT;
+    this._stale = false;
     return this;
   }
 
-  /**
-   * Returns true when the subscription is active.
-   * @returns {boolean}
-   */
   get subscribed() {
     return this._lifecycle === ACTIVE;
   }
 
   set path(newPath) {
+    this._ensureInactive('path');
     this._path = newPath;
     this._specMeta = null;
     this._metaCache = null;
     this._loadSpecMeta(newPath);
-    if (this.subscribed ) {
-      this.terminate(false);
-      this.subscribe();
-    }
   }
 
   get path() {
     return this._path;
   }
 
-  set onChange(newOnChange) {
-    this._onChange = newOnChange;
+  get onDelta() {
+    return this._onDelta;
+  }
+
+  set onDelta(fn) {
+    this._ensureInactive('onDelta');
+    this._onDelta = fn;
   }
 
   get onChange() {
-    return this._onChange;
+    return this.onDelta;
   }
 
-  /**
-   * Called once when the subscription is ACTIVE and no delivery has arrived for idlePeriod ms.
-   * Restarted by subscribe() and by every incoming delta.
-   * Set to null to disable.
-   */
+  set onChange(fn) {
+    this.onDelta = fn;
+  }
+
   get onIdle() {
     return this._onIdle;
   }
 
   set onIdle(fn) {
+    this._ensureInactive('onIdle');
     this._onIdle = fn;
-    this._armIdleTimer();
+  }
+
+  get onStale() {
+    return this._onStale;
+  }
+
+  set onStale(fn) {
+    this._ensureInactive('onStale');
+    this._onStale = fn;
   }
 
   get idlePeriod() {
@@ -440,94 +501,66 @@ class MessageHandler {
   }
 
   set idlePeriod(ms) {
+    this._ensureInactive('idlePeriod');
     this._idlePeriod = ms;
-    this._armIdleTimer();
   }
 
-  /**
-   * Configures the path and subscription options for this handler.
-   * @param {string} path - The Signal K path to subscribe to.
-   * @param {Object} [subscribeOptions={ excludeSelf: true }] - Options passed to the subscription manager.
-   *   Supports `excludeSelf` (boolean) and `excludeSources` (string[]).
-   *   Pass `{}` to receive the plugin's own output alongside other sources.
-   * @returns {this}
-   */
+  get stalePeriod() {
+    return this._stalePeriod;
+  }
+
+  set stalePeriod(ms) {
+    this._ensureInactive('stalePeriod');
+    this._stalePeriod = ms;
+  }
+
   configure(path, subscribeOptions = { excludeSelf: true }) {
+    this._ensureInactive('configure');
     this._path = path;
     this._subscribeOptions = subscribeOptions;
     this._specMeta = null;
     this._metaCache = null;
     this._loadSpecMeta(path);
-    if (this.subscribed) {
-      this.terminate(false);
-      this.subscribe();
-    }
     return this;
   }
 
-
-  /**
-   * Releases the current subscription without clearing callbacks or metadata.
-   * Moves lifecycle to INACTIVE and cancels the idle timer.
-   * Call subscribe() afterwards to reconnect.
-   */
   unsubscribe() {
-    if (this._idleTimer) {
-      clearTimeout(this._idleTimer);
-      this._idleTimer = null;
-    }
+    this._clearEventTimers();
     this._unsubscribes.forEach(fn => fn());
     this._unsubscribes = [];
     this._lifecycle = INACTIVE;
   }
 
-  /**
-   * Terminates the handler: moves lifecycle to INACTIVE and releases the subscription.
-   * Value status is preserved — the last received value (FRESH/STALE/ABSENT) is retained
-   * so callers can still read it after stop.
-   * @param {boolean} [clearCallback=true] - If false, preserves _onChange and _onIdle (used for internal resubscribes).
-   */
   terminate(clearCallback = true) {
     if (clearCallback) {
-      this._onChange = null;
+      this._onDelta = null;
       this._onIdle = null;
+      this._onStale = null;
     }
     this.unsubscribe();
     return null;
   }
 
-  /**
-   * Sends a batch of messages to Signal K.
-   * @static
-   * @param {Object} app - The app instance.
-   * @param {string} pluginId - Plugin identifier.
-   * @param {Array<{path: string, value: *}>} messages - Array of messages.
-   */
   static send(app, pluginId, messages) {
-    let values = [];
+    const values = [];
     messages.forEach(delta => {
-
       if (delta.ready) {
         values.push({
           path: delta._path,
           value: delta.value
         });
       }
-
     });
     const message = {
       context: 'vessels.self',
-      updates: [
-        {
-          $source: pluginId,
-          values: values
-        }]
+      updates: [{
+        $source: pluginId,
+        values
+      }]
     };
     if (values.length > 0) app.handleMessage(pluginId, message);
   }
 
-  // Write null to the SK path for each handler. Accepts MessageHandler or MessageSmoother
-  // (delegates via .handler pointer) so callers can pass either type.
   static clear(app, pluginId, handlers) {
     const values = handlers
       .map(h => (h.handler ? h.handler.path : h.path))
@@ -539,7 +572,6 @@ class MessageHandler {
     });
   }
 
-  // Send meta updates for one or more paths
   static sendMeta(app, pluginId, metaEntries) {
     const meta = metaEntries.map(entry => ({
       path: entry.path,
@@ -547,50 +579,41 @@ class MessageHandler {
     }));
     const message = {
       context: 'vessels.self',
-      updates: [
-        {
-          $source: pluginId,
-          meta
-        }
-      ]
+      updates: [{
+        $source: pluginId,
+        meta
+      }]
     };
     app.handleMessage(pluginId, message);
   }
 
-  // Convenience for a single path
   static setMeta(app, pluginId, path, value) {
     return MessageHandler.sendMeta(app, pluginId, [{ path, value }]);
   }
 
-  // subscribes to a single path and source.
   subscribe() {
     const path = this._path;
     const app = this._app;
 
-    if (!path || path === "") {
+    if (!path || path === '') {
       app.debug(`${this.id} is trying to subscribe to an empty path, subscription aborted`);
-      // No value received → treat as STALE so callers know it's not working
-      this._valueStatus = STALE;
-      return;
+      return this;
     }
 
     app.debug(`Subscribing to ${path}`);
-    // Cancel any pending idle-debug timer from a previous subscription
-    if (this._idleTimer) {
-      clearTimeout(this._idleTimer);
-      this._idleTimer = null;
-    }
-
+    this._valueStatus = ABSENT;
+    this._stale = false;
+    this.timestamp = null;
+    this.frequency = null;
+    this.n = 0;
+    this._clearEventTimers();
     this._subscribeViaManager(path);
     this._lifecycle = ACTIVE;
     this._armIdleTimer();
+    this._armStaleTimer();
     return this;
   }
 
-  /**
-   * Subscribes to a path via the subscription manager.
-   * @private
-   */
   _subscribeViaManager(path) {
     const app = this._app;
     app.subscriptionmanager.subscribe(
@@ -605,6 +628,8 @@ class MessageHandler {
               if (path === entry.path) {
                 this._value = entry.value;
                 this._valueStatus = FRESH;
+                this._stale = false;
+                this.n++;
                 this.updateFrequency();
                 found = true;
               }
@@ -612,80 +637,31 @@ class MessageHandler {
           }
         });
         if (found) {
-          this._armIdleTimer();
-          if (typeof this._onChange === 'function') {
-            this._onChange();
-          }
+          this._idleTimer = clearTimer(this._idleTimer);
+          this._armStaleTimer();
+          this._dispatchDelta();
         }
       }
     );
   }
 
-  get stalenessDetection() {
-    return this._stalenessDetection;
-  }
-
-  set stalenessDetection(val) {
-    this._stalenessDetection = val;
-    this._armIdleTimer();
-  }
-
-  /**
-   * Computed staleness: true when stalenessDetection is enabled and no delivery
-   * has arrived within idlePeriod ms.
-   * Value status ABSENT is never reported as stale — it is simply "no data yet".
-   * @returns {boolean}
-   */
   get stale() {
-    if (!this._stalenessDetection) return false;
-    if (this._valueStatus === ABSENT) return false;
-    if (this.timestamp === null) return true;
-    return Date.now() - this.timestamp >= this.idlePeriod;
+    return this._stale;
   }
 
-  /**
-   * Arms the idle timer. When it fires (after idlePeriod ms of no delivery while ACTIVE),
-   * emits a debug log and calls onIdle. Single fire — does not reschedule.
-   * Restarted by subscribe() and by every incoming delta.
-   * No-ops (and cancels any pending timer) when any condition is not met:
-   *   stalenessDetection disabled | lifecycle INACTIVE | onIdle not set | idlePeriod <= 0.
-   * @private
-   */
-  _armIdleTimer() {
-    if (this._idleTimer) { clearTimeout(this._idleTimer); this._idleTimer = null; }
-    if (!this._stalenessDetection || this._lifecycle !== ACTIVE || !this._onIdle || !(this._idlePeriod > 0)) return;
-    this._idleTimer = setTimeout(() => {
-      this._idleTimer = null;
-      this._app.debug(`No data for ${this.path}`);
-      if (this._lifecycle === ACTIVE && typeof this._onIdle === 'function') {
-        this._onIdle();
-      }
-    }, this._idlePeriod);
-  }
-
-  /**
-   * Loads spec-defined metadata for the given path using app.getMetadata.
-   * Synchronous and in-process — no HTTP, no authentication required.
-   * Safe to call on every delta: if the path is unknown getMetadata returns
-   * null/undefined and _specMeta stays null, which is fine.
-   * @private
-   */
   _loadSpecMeta(path) {
     if (!path) return;
     const data = this._app.getMetadata?.('vessels.self.' + path);
     if (data && typeof data === 'object') {
       this._specMeta = data;
-      this._metaCache = null; // invalidate cached meta
+      this._metaCache = null;
     }
   }
 
-  /**
-   * Updates the frequency estimate based on the latest update.
-   */
   updateFrequency() {
     const now = Date.now();
     if (this.timestamp) {
-      const dt = (now - this.timestamp);
+      const dt = now - this.timestamp;
       const freq = dt > 0 ? 1000 / dt : 0;
       if (this.frequency === null) {
         this.frequency = freq;
@@ -696,25 +672,12 @@ class MessageHandler {
     this.timestamp = now;
   }
 
-  /**
-   * Gets static metadata for this handler.
-   * The spec-metadata portion (_specMeta) is merged once and cached in _metaCache;
-   * the cache is invalidated when _specMeta changes or the path is reset.
-   * getSelfPath() is still called on every read because it reflects live SK state.
-   * SK may contribute displayName, description, units, zones, etc.
-   * If a field is absent from SK, it will not appear here — the webapp supplies fallbacks.
-   * @returns {Object}
-   */
   get meta() {
     try {
       if (this._specMeta === null) this._loadSpecMeta(this._path);
       const skMeta = this._app.getSelfPath(this.path)?.meta ?? {};
       if (!this._metaCache) {
-        // Rebuild the spec-meta merge. Only runs when _specMeta changes.
         const restMeta = this._specMeta ?? {};
-        // REST cache is the base; getSelfPath overlays field by field.
-        // For object-valued fields (e.g. displayUnits), merge one level deeper so
-        // REST cache fills any members that getSelfPath omits due to the known bug.
         const merged = { ...restMeta };
         for (const [key, val] of Object.entries(skMeta)) {
           if (val && typeof val === 'object' && !Array.isArray(val) &&
@@ -726,16 +689,24 @@ class MessageHandler {
         }
         this._metaCache = merged;
       }
-      return { id: this.id, path: this.path, idlePeriod: this.idlePeriod, ...this._metaCache };
+      return {
+        id: this.id,
+        path: this.path,
+        idlePeriod: this.idlePeriod,
+        stalePeriod: this.stalePeriod,
+        ...this._metaCache
+      };
     } catch (e) {
-      return { id: this.id, path: this.path, idlePeriod: this.idlePeriod, ...(this._specMeta ?? {}) };
+      return {
+        id: this.id,
+        path: this.path,
+        idlePeriod: this.idlePeriod,
+        stalePeriod: this.stalePeriod,
+        ...(this._specMeta ?? {})
+      };
     }
   }
 
-  /**
-   * Gets dynamic state for this handler.
-   * @returns {Object}
-   */
   get state() {
     const lastDelta = this.timestamp;
     return {
@@ -746,7 +717,6 @@ class MessageHandler {
       pathKnown: this._specMeta !== null,
       hasDelta: this._valueStatus !== ABSENT,
       isStale: this.stale,
-      stalenessDetection: this._stalenessDetection,
       lastDelta,
       deltaAge: lastDelta ? Date.now() - lastDelta : null,
       frequency: this.frequency,
@@ -754,26 +724,10 @@ class MessageHandler {
     };
   }
 
-  /**
-   * Returns true when this handler holds a currently valid value.
-   * ready = ACTIVE lifecycle AND FRESH value status.
-   *
-   * Exception: when stalenessDetection is disabled (constant/placeholder contributors
-   * such as a fixed angle of 0), lifecycle is irrelevant — ready as soon as any value
-   * has been assigned.
-   * @returns {boolean}
-   */
   get ready() {
-    if (!this._stalenessDetection) {
-      return this._valueStatus !== ABSENT;
-    }
-    return this._lifecycle === ACTIVE && !this.stale && this._valueStatus !== ABSENT;
+    return this._valueStatus !== ABSENT && !this.stale;
   }
 
-  /**
-   * Returns a summary object for reporting.
-   * @returns {Object}
-   */
   report() {
     return {
       id: this.id,
@@ -793,13 +747,23 @@ function createSmoothedHandler({
   SmootherClass = ExponentialSmoother,
   smootherOptions = {},
   subscribeOptions = { excludeSelf: true },
+  onDelta = null,
+  onIdle = null,
+  onStale = null,
+  idlePeriod,
+  stalePeriod,
 }) {
   const handler = new MessageHandler(app, pluginId, id);
   handler.configure(path, subscribeOptions);
-  const smoother = new MessageSmoother(handler, SmootherClass, smootherOptions); // create before subscribe to avoid race
+  const smoother = new MessageSmoother(handler, SmootherClass, smootherOptions, {
+    onDelta,
+    onIdle,
+    onStale,
+    idlePeriod,
+    stalePeriod,
+  });
   if (subscribe) {
-    handler.subscribe();
-    handler.onChange = () => { smoother.sample(); };
+    smoother.subscribe();
   }
   return smoother;
 }

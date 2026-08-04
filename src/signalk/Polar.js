@@ -1,36 +1,38 @@
 const { MessageHandler } = require('./MessageHandler');
 const { MovingAverageSmoother, ExponentialSmoother, KalmanSmoother } = require('./smoothers');
 
+const INACTIVE = 'INACTIVE';
+const ACTIVE = 'ACTIVE';
+const ABSENT = 'ABSENT';
+const FRESH = 'FRESH';
+const STALE = 'STALE';
+const DEFAULT_IDLE_PERIOD = 60000;
+const DEFAULT_STALE_PERIOD = 4000;
+
+function clearTimer(timer) {
+  if (timer) clearTimeout(timer);
+  return null;
+}
 
 class Polar {
   static send(app, pluginId, polars) {
-    let values = [];
+    const values = [];
     polars.forEach(polar => {
       if (polar.ready) {
-      values.push({
-        path: polar.pathMagnitude,
-        value: polar.magnitude 
-      });
-      values.push({
-        path: polar.pathAngle,
-        value: polar.angle 
-      });
-    }
+        values.push({ path: polar.pathMagnitude, value: polar.magnitude });
+        values.push({ path: polar.pathAngle, value: polar.angle });
+      }
     });
     const message = {
       context: 'vessels.self',
-      updates: [
-        {
-          $source: pluginId,
-          values: values
-        }]
+      updates: [{
+        $source: pluginId,
+        values
+      }]
     };
-     if (values.length > 0) app.handleMessage(pluginId, message);
+    if (values.length > 0) app.handleMessage(pluginId, message);
   }
 
-  // Write null to the magnitude and angle SK paths for each polar.
-  // Accepts Polar or PolarSmoother (delegates via .polar pointer) so callers
-  // can pass either type.
   static clear(app, pluginId, polars) {
     const values = [];
     polars.forEach(p => {
@@ -50,10 +52,23 @@ class Polar {
     this._id = id;
     this._polarMeta = {};
     this._ready = false;
+    this._valueStatus = ABSENT;
+    this._stale = false;
+    this._lifecycle = INACTIVE;
     this._magnitudeThreshold = null;
     this._usingFallbackAngle = false;
-    this.magnitudeHandler = new MessageHandler(app, pluginId, id + ".magnitude");
-    this.angleHandler = new MessageHandler(app, pluginId, id + ".angle");
+    this._idlePeriod = DEFAULT_IDLE_PERIOD;
+    this._stalePeriod = DEFAULT_STALE_PERIOD;
+    this._idleTimer = null;
+    this._staleTimer = null;
+    this._onDelta = null;
+    this._onIdle = null;
+    this._onStale = null;
+    this._deltaListeners = new Set();
+    this._processBound = this.processChanges.bind(this);
+    this.magnitudeHandler = new MessageHandler(app, pluginId, id + '.magnitude');
+    this.angleHandler = new MessageHandler(app, pluginId, id + '.angle');
+    this.angleRange = '-piToPi';
   }
 
   /**
@@ -64,12 +79,69 @@ class Polar {
     return this._id;
   }
 
+  _ensureInactive(field) {
+    if (this.subscribed) {
+      throw new Error(`Cannot modify ${field} while subscription is ACTIVE for ${this.id}`);
+    }
+  }
+
+  _clearEventTimers() {
+    this._idleTimer = clearTimer(this._idleTimer);
+    this._staleTimer = clearTimer(this._staleTimer);
+  }
+
+  _armIdleTimer() {
+    this._idleTimer = clearTimer(this._idleTimer);
+    if (this._lifecycle !== ACTIVE || typeof this._onIdle !== 'function' || !(this._idlePeriod > 0)) return;
+    this._idleTimer = setTimeout(() => {
+      this._idleTimer = null;
+      if (this._lifecycle === ACTIVE && this._valueStatus === ABSENT && typeof this._onIdle === 'function') {
+        this._onIdle();
+      }
+    }, this._idlePeriod);
+  }
+
+  _armStaleTimer() {
+    this._staleTimer = clearTimer(this._staleTimer);
+    if (this._lifecycle !== ACTIVE || typeof this._onStale !== 'function' || !(this._stalePeriod > 0)) return;
+    this._staleTimer = setTimeout(() => {
+      this._staleTimer = null;
+      if (this._lifecycle !== ACTIVE || this._stale) return;
+      this._stale = true;
+      if (this._valueStatus !== ABSENT) this._valueStatus = STALE;
+      if (typeof this._onStale === 'function') this._onStale();
+    }, this._stalePeriod);
+  }
+
+  _dispatchDelta() {
+    for (const listener of this._deltaListeners) {
+      listener();
+    }
+    if (typeof this._onDelta === 'function') {
+      this._onDelta();
+    }
+  }
+
+  addDeltaListener(fn) {
+    if (typeof fn === 'function') this._deltaListeners.add(fn);
+    return this;
+  }
+
+  removeDeltaListener(fn) {
+    this._deltaListeners.delete(fn);
+    return this;
+  }
+
   configureAngle(pathAngle, subscribeOptions = { excludeSelf: true }) {
+    this._ensureInactive('angle path');
     this.angleHandler.configure(pathAngle, subscribeOptions);
+    return this;
   }
 
   configureMagnitude(pathMagnitude, subscribeOptions = { excludeSelf: true }) {
+    this._ensureInactive('magnitude path');
     this.magnitudeHandler.configure(pathMagnitude, subscribeOptions);
+    return this;
   }
 
   /**
@@ -80,39 +152,120 @@ class Polar {
    */
   configureFallbackAngle(threshold) {
     this._magnitudeThreshold = threshold;
+    return this;
   }
 
   get angleFallbackActive() {
     return this._usingFallbackAngle;
   }
 
+  get subscribed() {
+    return this.magnitudeHandler.subscribed || this.angleHandler.subscribed;
+  }
+
+  get onDelta() {
+    return this._onDelta;
+  }
+
+  set onDelta(fn) {
+    this._ensureInactive('onDelta');
+    this._onDelta = fn;
+  }
+
+  get onChange() {
+    return this.onDelta;
+  }
+
+  set onChange(fn) {
+    this.onDelta = fn;
+  }
+
+  get onIdle() {
+    return this._onIdle;
+  }
+
+  set onIdle(fn) {
+    this._ensureInactive('onIdle');
+    this._onIdle = fn;
+  }
+
+  get onStale() {
+    return this._onStale;
+  }
+
+  set onStale(fn) {
+    this._ensureInactive('onStale');
+    this._onStale = fn;
+  }
+
+  get idlePeriod() {
+    return this._idlePeriod;
+  }
+
+  set idlePeriod(ms) {
+    this._ensureInactive('idlePeriod');
+    this._idlePeriod = ms;
+  }
+
+  get stalePeriod() {
+    return this._stalePeriod;
+  }
+
+  set stalePeriod(ms) {
+    this._ensureInactive('stalePeriod');
+    this._stalePeriod = ms;
+  }
+
   subscribe(toMagnitude = true, toAngle = true) {
+    this._valueStatus = ABSENT;
+    this._ready = false;
+    this._stale = false;
+    this._clearEventTimers();
     if (toMagnitude) {
-      this.magnitudeHandler.onChange = this.processChanges.bind(this);
-         this.magnitudeHandler.subscribe();
-    } 
+      this.magnitudeHandler.addDeltaListener(this._processBound);
+      this.magnitudeHandler.subscribe();
+    }
     if (toAngle) {
-      this.angleHandler.onChange = this.processChanges.bind(this);
+      this.angleHandler.addDeltaListener(this._processBound);
       this.angleHandler.subscribe();
     }
+    if (this.subscribed) {
+      this._lifecycle = ACTIVE;
+      this._armIdleTimer();
+      this._armStaleTimer();
+    } else {
+      this._lifecycle = INACTIVE;
+    }
+    return this;
   }
 
   setAngleRange(range) {
     if (range === '0to2pi' || range === '-piToPi') {
       this.angleRange = range;
     }
+    return this;
   }
-
-
 
   unsubscribe() {
+    this._lifecycle = INACTIVE;
+    this._clearEventTimers();
     this.magnitudeHandler.unsubscribe();
     this.angleHandler.unsubscribe();
+    return this;
   }
 
-  terminate() {
-    this.magnitudeHandler.terminate();
-    this.angleHandler.terminate();
+  terminate(clearCallback = true) {
+    this._lifecycle = INACTIVE;
+    this._clearEventTimers();
+    this.magnitudeHandler.removeDeltaListener(this._processBound);
+    this.angleHandler.removeDeltaListener(this._processBound);
+    if (clearCallback) {
+      this._onDelta = null;
+      this._onIdle = null;
+      this._onStale = null;
+    }
+    this.magnitudeHandler.terminate(clearCallback);
+    this.angleHandler.terminate(clearCallback);
     return null;
   }
 
@@ -120,16 +273,24 @@ class Polar {
     const belowThreshold = this._magnitudeThreshold !== null &&
       this.magnitudeHandler.ready &&
       Math.abs(this.magnitudeHandler.value) <= this._magnitudeThreshold;
+    const canProcess = this.magnitudeHandler.ready && (belowThreshold || this.angleHandler.ready);
+    if (!canProcess) {
+      this._ready = false;
+      return this;
+    }
     this._usingFallbackAngle = belowThreshold;
     const angleValue = belowThreshold ? 0 : this.angleHandler.value;
     this.xValue = this.magnitudeHandler.value * Math.cos(angleValue);
     this.yValue = this.magnitudeHandler.value * Math.sin(angleValue);
     this.xVariance = 0;
     this.yVariance = 0;
-    this._ready = this.magnitudeHandler.ready && (belowThreshold || this.angleHandler.ready);
-    if (typeof this.onChange === 'function') {
-      this.onChange();
-    }
+    this._ready = true;
+    this._valueStatus = FRESH;
+    this._stale = false;
+    this._idleTimer = clearTimer(this._idleTimer);
+    this._armStaleTimer();
+    this._dispatchDelta();
+    return this;
   }
 
   copyFrom(polar) {
@@ -182,6 +343,8 @@ class Polar {
     this.xVariance = 0;
     this.yVariance = 0;
     this._ready = true;
+    this._valueStatus = FRESH;
+    this._stale = false;
   }
 
   setVectorValue(value= { x: 0, y: 0 }, variance = { x: 0, y: 0 }) {
@@ -190,6 +353,8 @@ class Polar {
     this.xVariance = variance.x;
     this.yVariance = variance.y;
     this._ready = true;
+    this._valueStatus = FRESH;
+    this._stale = false;
   }
 
   setMeta(obj) {
@@ -221,6 +386,8 @@ class Polar {
       id: this.id,
       ...this._polarMeta,
       angleRange: this.angleRange,
+      idlePeriod: this.idlePeriod,
+      stalePeriod: this.stalePeriod,
       magnitude: this.magnitudeHandler.meta,
       angle: this.angleHandler.meta,
     };
@@ -237,12 +404,13 @@ class Polar {
     const oldestDelta = (t1 !== null && t2 !== null) ? Math.min(t1, t2) : (t1 ?? t2);
     return {
       id: this.id,
+      lifecycle: this._lifecycle,
+      valueStatus: this._valueStatus,
       ready: this.ready,
       isStale: this.stale,
       hasValue: this._ready,
       pathKnown: this.magnitudeHandler._specMeta !== null && this.angleHandler._specMeta !== null,
-      subscribed: this.magnitudeHandler.subscribed && this.angleHandler.subscribed,
-      stalenessDetection: this.stalenessDetection,
+      subscribed: this.subscribed,
       angleFallbackActive: this._usingFallbackAngle,
       lastDelta,
       deltaAge: oldestDelta ? Date.now() - oldestDelta : null,
@@ -321,17 +489,8 @@ class Polar {
     return null;
   }
 
-  get stalenessDetection() {
-    return this.magnitudeHandler.stalenessDetection && this.angleHandler.stalenessDetection;
-  }
-
-  set stalenessDetection(val) {
-    this.magnitudeHandler.stalenessDetection = val;
-    this.angleHandler.stalenessDetection = val;
-  }
-
   get stale() {
-    return (this.magnitudeHandler.subscribed && this.magnitudeHandler.stale) || (this.angleHandler.subscribed && this.angleHandler.stale);
+    return this._stale;
   }
 
   /**
@@ -341,6 +500,8 @@ class Polar {
    */
   invalidate() {
     this._ready = false;
+    this._valueStatus = ABSENT;
+    this._stale = false;
     return this;
   }
 
@@ -392,7 +553,7 @@ class PolarSmoother {
    * @param {Function} SmootherClass - The smoother class to use (default: ExponentialSmoother).
    * @param {Object} [smootherOptions={}] - Options for the smoother.
    */
-  constructor(polar, SmootherClass = ExponentialSmoother, smootherOptions = {}) {
+  constructor(polar, SmootherClass = ExponentialSmoother, smootherOptions = {}, eventOptions = {}) {
     this.id = polar.id + '.smoothed';
     this.polar = polar;
     this.SmootherClass = SmootherClass;
@@ -402,11 +563,21 @@ class PolarSmoother {
     this.timestamp = null;
     this.n = 0;
     this.angleRange = '-piToPi';
-    this.onChange = null;
-    this._stale = true;
+    this._lifecycle = polar.subscribed ? ACTIVE : INACTIVE;
+    this._valueStatus = ABSENT;
+    this._stale = false;
     this._idleTimer = null;
-    this.idlePeriod = this._derivedIdlePeriod(smootherOptions);
-    this._stalenessDetection = true;
+    this._staleTimer = null;
+    this._idlePeriod = eventOptions.idlePeriod ?? DEFAULT_IDLE_PERIOD;
+    this._stalePeriod = eventOptions.stalePeriod ?? this._derivedStalePeriod(smootherOptions);
+    this._onDelta = eventOptions.onDelta ?? null;
+    this._onIdle = eventOptions.onIdle ?? null;
+    this._onStale = eventOptions.onStale ?? null;
+    this._handleSourceDelta = () => { this.sample(); };
+    this.polar.addDeltaListener(this._handleSourceDelta);
+    if (this.polar.subscribed) {
+      this._activateLifecycle();
+    }
   }
 
   /**
@@ -420,37 +591,90 @@ class PolarSmoother {
     this.n = 0;
   }
 
-  _derivedIdlePeriod(opts) {
-    const MIN_IDLE = 5000;
-    if (typeof opts.timeConstant === 'number') return Math.max(opts.timeConstant * 3000, MIN_IDLE);
-    if (typeof opts.tau === 'number') return Math.max(opts.tau * 3000, MIN_IDLE);
-    if (typeof opts.timeSpan === 'number') return Math.max(opts.timeSpan * 3000, MIN_IDLE);
-    // KalmanSmoother (processVariance/measurementVariance/steadyState) has no
-    // time-based parameter — use a sensible default.
-    return 10000;
+  _ensureInactive(field) {
+    if (this.subscribed) {
+      throw new Error(`Cannot modify ${field} while subscription is ACTIVE for ${this.id}`);
+    }
   }
 
-  _resetIdleTimer() {
-    if (!this._stalenessDetection) return;
-    if (this._idleTimer) clearTimeout(this._idleTimer);
+  _clearEventTimers() {
+    this._idleTimer = clearTimer(this._idleTimer);
+    this._staleTimer = clearTimer(this._staleTimer);
+  }
+
+  _armIdleTimer() {
+    this._idleTimer = clearTimer(this._idleTimer);
+    if (this._lifecycle !== ACTIVE || typeof this._onIdle !== 'function' || !(this._idlePeriod > 0)) return;
+    this._idleTimer = setTimeout(() => {
+      this._idleTimer = null;
+      if (this._lifecycle === ACTIVE && this._valueStatus === ABSENT && typeof this._onIdle === 'function') {
+        this._onIdle();
+      }
+    }, this._idlePeriod);
+  }
+
+  _armStaleTimer() {
+    this._staleTimer = clearTimer(this._staleTimer);
+    if (this._lifecycle !== ACTIVE || typeof this._onStale !== 'function' || !(this._stalePeriod > 0)) return;
+    this._staleTimer = setTimeout(() => {
+      this._staleTimer = null;
+      if (this._lifecycle !== ACTIVE || this._stale) return;
+      this._stale = true;
+      if (this._valueStatus !== ABSENT) this._valueStatus = STALE;
+      if (typeof this._onStale === 'function') this._onStale();
+    }, this._stalePeriod);
+  }
+
+  _activateLifecycle() {
+    this._lifecycle = ACTIVE;
+    this._valueStatus = ABSENT;
     this._stale = false;
-    this._idleTimer = setTimeout(() => { this._stale = true; }, this.idlePeriod);
+    this.reset();
+    this._armIdleTimer();
+    this._armStaleTimer();
+  }
+
+  _deactivateLifecycle() {
+    this._lifecycle = INACTIVE;
+    this._clearEventTimers();
+  }
+
+  _derivedStalePeriod(opts) {
+    const MIN_PERIOD = DEFAULT_STALE_PERIOD;
+    if (typeof opts.timeConstant === 'number') return Math.max(opts.timeConstant * 3000, MIN_PERIOD);
+    if (typeof opts.tau === 'number') return Math.max(opts.tau * 3000, MIN_PERIOD);
+    if (typeof opts.timeSpan === 'number') return Math.max(opts.timeSpan * 3000, MIN_PERIOD);
+    return DEFAULT_STALE_PERIOD;
+  }
+
+  get subscribed() {
+    return this.polar.subscribed;
+  }
+
+  subscribe(toMagnitude = true, toAngle = true) {
+    this.polar.subscribe(toMagnitude, toAngle);
+    if (this.subscribed) {
+      this._activateLifecycle();
+    } else {
+      this._deactivateLifecycle();
+    }
+    return this;
   }
 
   unsubscribe() {
-    if (this._idleTimer) {
-      clearTimeout(this._idleTimer);
-      this._idleTimer = null;
-    }
+    this._deactivateLifecycle();
     return this.polar.unsubscribe();
   }
 
-  terminate() {
-    if (this._idleTimer) {
-      clearTimeout(this._idleTimer);
-      this._idleTimer = null;
+  terminate(clearCallback = true) {
+    this._deactivateLifecycle();
+    this.polar.removeDeltaListener(this._handleSourceDelta);
+    if (clearCallback) {
+      this._onDelta = null;
+      this._onIdle = null;
+      this._onStale = null;
     }
-    return this.polar.terminate();
+    return this.polar.terminate(clearCallback);
   }
 
   /**
@@ -458,17 +682,73 @@ class PolarSmoother {
    */
   sample() {
     if (!this.polar.ready) return this;
-    if (this._stale) this.reset();
+    if (this._stale || this.n === 0) this.reset();
     const now = Date.now();
     this.xSmoother.add(this.polar.xValue, this.polar.xVariance);
     this.ySmoother.add(this.polar.yValue, this.polar.yVariance);
     this.timestamp = now;
     this.n++;
-    this._resetIdleTimer();
-    if (typeof this.onChange === 'function') {
-      this.onChange();
+    this._valueStatus = FRESH;
+    this._stale = false;
+    this._idleTimer = clearTimer(this._idleTimer);
+    this._armStaleTimer();
+    if (typeof this._onDelta === 'function') {
+      this._onDelta();
     }
     return this;
+  }
+
+  get onDelta() {
+    return this._onDelta;
+  }
+
+  set onDelta(fn) {
+    this._ensureInactive('onDelta');
+    this._onDelta = fn;
+  }
+
+  get onChange() {
+    return this.onDelta;
+  }
+
+  set onChange(fn) {
+    this.onDelta = fn;
+  }
+
+  get onIdle() {
+    return this._onIdle;
+  }
+
+  set onIdle(fn) {
+    this._ensureInactive('onIdle');
+    this._onIdle = fn;
+  }
+
+  get onStale() {
+    return this._onStale;
+  }
+
+  set onStale(fn) {
+    this._ensureInactive('onStale');
+    this._onStale = fn;
+  }
+
+  get idlePeriod() {
+    return this._idlePeriod;
+  }
+
+  set idlePeriod(ms) {
+    this._ensureInactive('idlePeriod');
+    this._idlePeriod = ms;
+  }
+
+  get stalePeriod() {
+    return this._stalePeriod;
+  }
+
+  set stalePeriod(ms) {
+    this._ensureInactive('stalePeriod');
+    this._stalePeriod = ms;
   }
 
   setAngleRange(range) {
@@ -547,7 +827,13 @@ class PolarSmoother {
    * @returns {Object}
    */
   get meta() {
-    return { id: this.id, ...this.polar.meta, smoother: { type: this.SmootherClass.name, ...this.smootherOptions } };
+    return {
+      id: this.id,
+      ...this.polar.meta,
+      idlePeriod: this.idlePeriod,
+      stalePeriod: this.stalePeriod,
+      smoother: { type: this.SmootherClass.name, ...this.smootherOptions }
+    };
   }
 
   /**
@@ -558,11 +844,12 @@ class PolarSmoother {
     const lastDelta = this.timestamp;
     return {
       id: this.id,
+      subscribed: this.subscribed,
+      valueStatus: this._valueStatus,
       ready: this.ready,
       isStale: this.stale,
       hasDelta: this.n > 0,
       nSamples: this.n,
-      stalenessDetection: this._stalenessDetection,
       lastDelta,
       deltaAge: lastDelta ? Date.now() - lastDelta : null,
       frequency: this.polar.frequency,
@@ -615,49 +902,12 @@ class PolarSmoother {
     return [this.xVariance, this.yVariance];
   }
 
-  get timestamp() {
-    return this._timestamp;
-  }
-
-  set timestamp(val) {
-    this._timestamp = val;
-  }
-
   get nSamples() {
     return this.n;
   }
 
-  get stalenessDetection() {
-    return this._stalenessDetection;
-  }
-
-  set stalenessDetection(val) {
-    this._stalenessDetection = val;
-    this.polar.stalenessDetection = val;
-    if (!val) {
-      if (this._idleTimer) {
-        clearTimeout(this._idleTimer);
-        this._idleTimer = null;
-      }
-      this._stale = false;
-    } else if (!this._idleTimer) {
-      // Re-enabling: evaluate immediately — don't wait for next delta
-      if (this.timestamp === null) {
-        this._stale = true;
-      } else {
-        const age = Date.now() - this.timestamp;
-        if (age >= this.idlePeriod) {
-          this._stale = true;
-        } else {
-          this._stale = false;
-          this._idleTimer = setTimeout(() => { this._stale = true; }, this.idlePeriod - age);
-        }
-      }
-    }
-  }
-
   get stale() {
-    return this._stalenessDetection ? this._stale : false;
+    return this._stale;
   }
 
   /**
@@ -666,7 +916,7 @@ class PolarSmoother {
    * @returns {boolean}
    */
   get ready() {
-    return this.n > 0 && !this.stale;
+    return this._valueStatus !== ABSENT && !this.stale;
   }
 
   get trace() {
@@ -722,17 +972,21 @@ class SmoothedAngle extends PolarSmoother {
     meta = {},
     SmootherClass = ExponentialSmoother,
     smootherOptions = { timeConstant: 1 },
-    subscribeOptions = { excludeSelf: true }
+    subscribeOptions = { excludeSelf: true },
+    onDelta = null,
+    onIdle = null,
+    onStale = null,
+    idlePeriod,
+    stalePeriod,
+    subscribe = true,
   } = {}) {
     const polar = new Polar(app, pluginId, id);
-    polar.configureAngle(path, subscribeOptions);
-    polar.subscribe(false, true);
     polar.magnitudeHandler.value = 1;
-    polar.magnitudeHandler.stalenessDetection = false; // fixed constant, never subscribed — timestamp stays null forever
-    super(polar, SmootherClass, smootherOptions);
+    polar.configureAngle(path, subscribeOptions);
+    super(polar, SmootherClass, smootherOptions, { onDelta, onIdle, onStale, idlePeriod, stalePeriod });
     this.polar.setMeta(meta);
     this.setAngleRange(angleRange);
-    polar.onChange = () => { this.sample(); };
+    if (subscribe) this.subscribe(false, true);
   }
 
   /** The underlying MessageHandler — mirrors MessageSmoother.handler. */
@@ -779,9 +1033,9 @@ class SmoothedAngle extends PolarSmoother {
       id: this.id,
       ready: this.ready,
       isStale: this.stale,
+      valueStatus: this._valueStatus,
       hasDelta: this.n > 0,
       nSamples: this.n,
-      stalenessDetection: this._stalenessDetection,
       lastDelta,
       deltaAge: lastDelta ? Date.now() - lastDelta : null,
       frequency: this.frequency,
@@ -830,6 +1084,11 @@ function createSmoothedPolar({
   angleRange = '-piToPi',
   magnitudeThreshold = 0.1,
   subscribeOptions = { excludeSelf: true },
+  onDelta = null,
+  onIdle = null,
+  onStale = null,
+  idlePeriod,
+  stalePeriod,
 }) {
 
   const polar = new Polar(app, pluginId, id);
@@ -838,9 +1097,14 @@ function createSmoothedPolar({
   polar.setAngleRange(angleRange);
   polar.setMeta(meta);
   if (magnitudeThreshold !== null) polar.configureFallbackAngle(magnitudeThreshold);
-  const smoother = new PolarSmoother(polar, SmootherClass, smootherOptions);
-  polar.onChange = () => { smoother.sample(); };
-  if (subscribe) polar.subscribe(true, true);
+  const smoother = new PolarSmoother(polar, SmootherClass, smootherOptions, {
+    onDelta,
+    onIdle,
+    onStale,
+    idlePeriod,
+    stalePeriod,
+  });
+  if (subscribe) smoother.subscribe(true, true);
   return smoother;
 }
 
