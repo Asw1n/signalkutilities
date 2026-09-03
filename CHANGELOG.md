@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [3.1.1] — 2026-09-04
+
+### Fixed
+- `onIdle` now fires whenever a subscription has been silent for `idlePeriod`, not only when it has never received a delta. The idle timer is re-armed on every delta instead of being cleared, so an input that goes quiet after a healthy start still triggers recovery in consuming plugins.
+
+---
+
+## [3.1.0] — 2026-08-04
+
 ### Fixed
 - `PolarSmoother.polarValue` now returns `null` when `!this.ready` (i.e. no samples have been received yet, or data has gone stale). Previously, the uninitialized smoother `x`/`y` estimates of `0` caused `polarValue` to return `{ magnitude: 0, angle: 0 }`, making callers unable to distinguish "no data" from a genuine zero reading.
 
