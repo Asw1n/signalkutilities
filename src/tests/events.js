@@ -89,6 +89,42 @@ describe('event lifecycle contract', () => {
     assert.equal(calls, 1);
   });
 
+  it('fires handler onIdle after deltas stop arriving', async () => {
+    const { app, deliver } = createAppShim();
+    let calls = 0;
+    const handler = new MessageHandler(app, 'plugin', 'test');
+    handler.configure('navigation.speedThroughWater');
+    handler.idlePeriod = 40;
+    handler.onIdle = () => { calls += 1; };
+    handler.subscribe();
+    deliver([{ path: 'navigation.speedThroughWater', value: 3.2 }]);
+    await new Promise(resolve => setTimeout(resolve, 25));
+    deliver([{ path: 'navigation.speedThroughWater', value: 3.3 }]);
+    await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(calls, 0, 'deltas must keep re-arming the idle timer');
+    await new Promise(resolve => setTimeout(resolve, 40));
+    assert.equal(calls, 1);
+  });
+
+  it('fires smoother onIdle after deltas stop arriving', async () => {
+    const { app, deliver } = createAppShim();
+    let calls = 0;
+    const smoother = createSmoothedHandler({
+      app,
+      pluginId: 'plugin',
+      id: 'speed',
+      path: 'navigation.speedThroughWater',
+      idlePeriod: 40,
+      onIdle: () => { calls += 1; }
+    });
+    smoother.subscribe();
+    deliver([{ path: 'navigation.speedThroughWater', value: 3.2 }]);
+    await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(calls, 0);
+    await new Promise(resolve => setTimeout(resolve, 40));
+    assert.equal(calls, 1);
+  });
+
   it('fires handler onStale once between deltas', async () => {
     const { app, deliver } = createAppShim();
     let calls = 0;
