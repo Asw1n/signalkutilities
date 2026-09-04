@@ -125,6 +125,48 @@ describe('event lifecycle contract', () => {
     assert.equal(calls, 1);
   });
 
+  it('fires polar onIdle after deltas stop arriving', async () => {
+    const { app, deliver } = createAppShim();
+    let calls = 0;
+    const polar = new Polar(app, 'plugin', 'wind');
+    polar.configureMagnitude('environment.wind.speedTrue');
+    polar.configureAngle('environment.wind.angleTrueWater');
+    polar.idlePeriod = 40;
+    polar.onIdle = () => { calls += 1; };
+    polar.subscribe(true, true);
+    deliver([
+      { path: 'environment.wind.speedTrue', value: 5 },
+      { path: 'environment.wind.angleTrueWater', value: 0.4 }
+    ]);
+    await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(calls, 0);
+    await new Promise(resolve => setTimeout(resolve, 40));
+    assert.equal(calls, 1);
+  });
+
+  it('fires polar smoother onIdle after deltas stop arriving', async () => {
+    const { app, deliver } = createAppShim();
+    let calls = 0;
+    const smoother = createSmoothedPolar({
+      app,
+      pluginId: 'plugin',
+      id: 'wind',
+      pathMagnitude: 'environment.wind.speedTrue',
+      pathAngle: 'environment.wind.angleTrueWater',
+      idlePeriod: 40,
+      onIdle: () => { calls += 1; }
+    });
+    smoother.subscribe(true, true);
+    deliver([
+      { path: 'environment.wind.speedTrue', value: 5 },
+      { path: 'environment.wind.angleTrueWater', value: 0.4 }
+    ]);
+    await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(calls, 0);
+    await new Promise(resolve => setTimeout(resolve, 40));
+    assert.equal(calls, 1);
+  });
+
   it('fires handler onStale once between deltas', async () => {
     const { app, deliver } = createAppShim();
     let calls = 0;

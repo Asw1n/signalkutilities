@@ -90,12 +90,13 @@ class Polar {
     this._staleTimer = clearTimer(this._staleTimer);
   }
 
+  // Re-armed on every delta, so firing always means idlePeriod of silence.
   _armIdleTimer() {
     this._idleTimer = clearTimer(this._idleTimer);
     if (this._lifecycle !== ACTIVE || typeof this._onIdle !== 'function' || !(this._idlePeriod > 0)) return;
     this._idleTimer = setTimeout(() => {
       this._idleTimer = null;
-      if (this._lifecycle === ACTIVE && this._valueStatus === ABSENT && typeof this._onIdle === 'function') {
+      if (this._lifecycle === ACTIVE && typeof this._onIdle === 'function') {
         this._onIdle();
       }
     }, this._idlePeriod);
@@ -287,7 +288,7 @@ class Polar {
     this._ready = true;
     this._valueStatus = FRESH;
     this._stale = false;
-    this._idleTimer = clearTimer(this._idleTimer);
+    this._armIdleTimer();
     this._armStaleTimer();
     this._dispatchDelta();
     return this;
@@ -602,12 +603,13 @@ class PolarSmoother {
     this._staleTimer = clearTimer(this._staleTimer);
   }
 
+  // Re-armed on every delta, so firing always means idlePeriod of silence.
   _armIdleTimer() {
     this._idleTimer = clearTimer(this._idleTimer);
     if (this._lifecycle !== ACTIVE || typeof this._onIdle !== 'function' || !(this._idlePeriod > 0)) return;
     this._idleTimer = setTimeout(() => {
       this._idleTimer = null;
-      if (this._lifecycle === ACTIVE && this._valueStatus === ABSENT && typeof this._onIdle === 'function') {
+      if (this._lifecycle === ACTIVE && typeof this._onIdle === 'function') {
         this._onIdle();
       }
     }, this._idlePeriod);
@@ -690,7 +692,7 @@ class PolarSmoother {
     this.n++;
     this._valueStatus = FRESH;
     this._stale = false;
-    this._idleTimer = clearTimer(this._idleTimer);
+    this._armIdleTimer();
     this._armStaleTimer();
     if (typeof this._onDelta === 'function') {
       this._onDelta();
