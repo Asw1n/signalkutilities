@@ -7,8 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [3.1.2] — 2026-09-04
+
 ### Added
 - `MessageSmoother.invalidate()` clears the current filtered value and requires a fresh source sample before the smoother becomes ready again. Consumers can use it to discard stale state at a manoeuvre or other data-boundary transition.
+
+### Fixed
+- `Polar` and `PolarSmoother` now re-arm the idle timer on every delta and no longer require `ABSENT` status for `onIdle` to fire, matching the `MessageHandler` fix in 3.1.1. A polar input that goes quiet after a healthy start previously produced no long-silence signal at all, so consumers could not recover it.
 
 ---
 
