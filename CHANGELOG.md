@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `MessageSmoother.invalidate()` clears the current filtered value and requires a fresh source sample before the smoother becomes ready again. Consumers can use it to discard stale state at a manoeuvre or other data-boundary transition.
+
 ---
 
 ## [3.1.1] — 2026-09-04

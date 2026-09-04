@@ -117,6 +117,13 @@ class MessageSmoother {
     }
   }
 
+  invalidate() {
+    this.reset();
+    this._valueStatus = ABSENT;
+    this._stale = false;
+    return this;
+  }
+
   subscribe() {
     this.handler.subscribe();
     if (this.handler.subscribed) {

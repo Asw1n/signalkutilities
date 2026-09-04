@@ -186,6 +186,30 @@ describe('event lifecycle contract', () => {
     assert.ok(polar.ready);
   });
 
+  it('invalidates a smoother until its next source delta', () => {
+    const { app, deliver } = createAppShim();
+    const smoother = createSmoothedHandler({
+      app,
+      pluginId: 'plugin',
+      id: 'leeway',
+      path: 'navigation.leewayAngle',
+      subscribe: true
+    });
+
+    deliver([{ path: 'navigation.leewayAngle', value: 0.1 }]);
+    assert.equal(smoother.ready, true);
+    assert.equal(smoother.value, 0.1);
+
+    smoother.invalidate();
+    assert.equal(smoother.ready, false);
+    assert.equal(smoother.value, null);
+    assert.equal(smoother.state.nSamples, 0);
+
+    deliver([{ path: 'navigation.leewayAngle', value: -0.1 }]);
+    assert.equal(smoother.ready, true);
+    assert.equal(smoother.value, -0.1);
+  });
+
   it('does not activate MessageSmoother lifecycle when subscribed path is empty', async () => {
     const { app } = createAppShim();
     let idleCalls = 0;
