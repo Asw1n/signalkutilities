@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.1.3] — 2026-09-08
+
+### Fixed
+- `MessageHandler.subscribe()` now falls back to a one-shot `app.getSelfPath()` read of the path's current value when the live subscription hasn't delivered anything yet. This closes a known signalk-server race (see `signalk-polar-performance-plugin/doc/subscription-race-bug.md`) where a path's very first delta after subscribing can be missed if the plugin subscribes after another plugin has already published to that path — for example a downstream plugin reading `polars.activePolar`/`polars.performanceFactor` after Polar Management has already started and published them. The fallback only runs if no delta has arrived, so it never overwrites a value the live subscription already delivered, and it transparently unwraps a full-data-model `{value, $source, timestamp}` node as well as a bare value.
+
+---
+
 ## [3.1.2] — 2026-09-04
 
 ### Added

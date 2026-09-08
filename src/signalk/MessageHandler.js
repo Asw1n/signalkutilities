@@ -620,7 +620,44 @@ class MessageHandler {
     this._lifecycle = ACTIVE;
     this._armIdleTimer();
     this._armStaleTimer();
+    // Fallback for the known signalk-server race where a path's very first delta after
+    // subscribing can be missed (see doc/subscription-race-bug.md in polar-performance).
+    // Only fires when the live subscription hasn't already delivered a value.
+    this._bootstrapFromCurrentValue();
     return this;
+  }
+
+  // Applies an incoming value (from a delta or a boot-time read) through the same
+  // status/timer/dispatch path, so callers can't tell which source delivered it.
+  _ingestValue(value) {
+    this._value = value;
+    this._valueStatus = FRESH;
+    this._stale = false;
+    this.n++;
+    this.updateFrequency();
+    this._armIdleTimer();
+    this._armStaleTimer();
+    this._dispatchDelta();
+  }
+
+  // Reads the path's current value directly from the full data model via
+  // app.getSelfPath(), as a one-shot fallback if no delta has arrived yet.
+  // Handles both a bare value and a wrapped `{value, $source, timestamp}` node.
+  _bootstrapFromCurrentValue() {
+    if (this._valueStatus !== ABSENT) return;
+    if (typeof this._app.getSelfPath !== 'function') return;
+    let entry;
+    try {
+      entry = this._app.getSelfPath(this._path);
+    } catch (_e) {
+      return;
+    }
+    if (entry === undefined || entry === null) return;
+    const value = (entry !== null && typeof entry === 'object' && !Array.isArray(entry) && 'value' in entry)
+      ? entry.value
+      : entry;
+    if (value === undefined || value === null) return;
+    this._ingestValue(value);
   }
 
   _subscribeViaManager(path) {
@@ -630,26 +667,19 @@ class MessageHandler {
       this._unsubscribes,
       err => app.debug(`MessageHandler[${this.id}] subscription error: ${err}`),
       delta => {
+        let latestValue;
         let found = false;
         delta?.updates?.forEach(update => {
           if (Array.isArray(update?.values)) {
             for (const entry of update.values) {
               if (path === entry.path) {
-                this._value = entry.value;
-                this._valueStatus = FRESH;
-                this._stale = false;
-                this.n++;
-                this.updateFrequency();
+                latestValue = entry.value;
                 found = true;
               }
             }
           }
         });
-        if (found) {
-          this._armIdleTimer();
-          this._armStaleTimer();
-          this._dispatchDelta();
-        }
+        if (found) this._ingestValue(latestValue);
       }
     );
   }
@@ -657,6 +687,7 @@ class MessageHandler {
   get stale() {
     return this._stale;
   }
+
 
   _loadSpecMeta(path) {
     if (!path) return;

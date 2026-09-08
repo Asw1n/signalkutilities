@@ -4,13 +4,13 @@ const assert = require('node:assert/strict');
 const { MessageHandler, createSmoothedHandler } = require('../signalk/MessageHandler');
 const { Polar, createSmoothedPolar } = require('../signalk/Polar');
 
-function createAppShim() {
+function createAppShim(options = {}) {
   const subscribers = new Map();
   return {
     app: {
       debug: () => {},
       getMetadata: () => undefined,
-      getSelfPath: () => undefined,
+      getSelfPath: options.getSelfPath || (() => undefined),
       handleMessage: () => {},
       subscriptionmanager: {
         subscribe: (msg, unsubscribes, _errorCb, deltaCb) => {
@@ -295,5 +295,52 @@ describe('event lifecycle contract', () => {
     assert.equal(smoother.state.subscribed, false);
     assert.equal(idleCalls, 0);
     assert.equal(staleCalls, 0);
+  });
+});
+
+describe('boot-time bootstrap fallback (subscription race workaround)', () => {
+  it('seeds the value from getSelfPath when no delta arrives at subscribe time', () => {
+    const { app } = createAppShim({ getSelfPath: () => ({ href: '/resources/polars/abc' }) });
+    let calls = 0;
+    const handler = new MessageHandler(app, 'plugin', 'test');
+    handler.configure('polars.activePolar');
+    handler.onDelta = () => { calls += 1; };
+    handler.subscribe();
+    assert.equal(calls, 1);
+    assert.deepEqual(handler.value, { href: '/resources/polars/abc' });
+    assert.equal(handler.ready, true);
+  });
+
+  it('unwraps a full-data-model node with a value property', () => {
+    const { app } = createAppShim({
+      getSelfPath: () => ({ value: 0.95, $source: 'polar-management', timestamp: '2026-01-01T00:00:00Z' })
+    });
+    const handler = new MessageHandler(app, 'plugin', 'test');
+    handler.configure('polars.performanceFactor');
+    handler.subscribe();
+    assert.equal(handler.value, 0.95);
+  });
+
+  it('does not overwrite a value already delivered by the live subscription', () => {
+    const { app, deliver } = createAppShim({ getSelfPath: () => ({ href: '/resources/polars/stale' }) });
+    const handler = new MessageHandler(app, 'plugin', 'test');
+    handler.configure('polars.activePolar');
+    // Simulate the subscription manager delivering the bootstrap snapshot
+    // synchronously, before the getSelfPath fallback runs.
+    const originalSubscribe = app.subscriptionmanager.subscribe;
+    app.subscriptionmanager.subscribe = (msg, unsubscribes, errorCb, deltaCb) => {
+      originalSubscribe(msg, unsubscribes, errorCb, deltaCb);
+      deliver([{ path: 'polars.activePolar', value: { href: '/resources/polars/fresh' } }]);
+    };
+    handler.subscribe();
+    assert.deepEqual(handler.value, { href: '/resources/polars/fresh' });
+  });
+
+  it('leaves value absent when getSelfPath has nothing to offer', () => {
+    const { app } = createAppShim({ getSelfPath: () => undefined });
+    const handler = new MessageHandler(app, 'plugin', 'test');
+    handler.configure('polars.activePolar');
+    handler.subscribe();
+    assert.equal(handler.ready, false);
   });
 });
