@@ -423,15 +423,13 @@ class MessageHandler {
 
   _armStaleTimer() {
     this._staleTimer = clearTimer(this._staleTimer);
-    if (this._lifecycle !== ACTIVE || typeof this._onStale !== 'function' || !(this._stalePeriod > 0)) return;
+    if (this._lifecycle !== ACTIVE || !(this._stalePeriod > 0)) return;
     this._staleTimer = setTimeout(() => {
       this._staleTimer = null;
       if (this._lifecycle !== ACTIVE || this._stale) return;
       this._stale = true;
       if (this._valueStatus !== ABSENT) this._valueStatus = STALE;
-      if (typeof this._onStale === 'function') {
-        this._onStale();
-      }
+      if (typeof this._onStale === 'function') this._onStale();
     }, this._stalePeriod);
   }
 

@@ -185,6 +185,21 @@ describe('event lifecycle contract', () => {
     assert.equal(calls, 2);
   });
 
+  it('marks handler state stale without an onStale callback', async () => {
+    const { app, deliver } = createAppShim();
+    const handler = new MessageHandler(app, 'plugin', 'attitude');
+    handler.configure('navigation.attitude');
+    handler.stalePeriod = 10;
+    handler.subscribe();
+    deliver([{ path: 'navigation.attitude', value: { roll: 0.1 } }]);
+
+    assert.equal(handler.state.ready, true);
+    assert.equal(handler.state.isStale, false);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(handler.state.ready, false);
+    assert.equal(handler.state.isStale, true);
+  });
+
   it('fires polar onDelta only when the polar becomes fresh', () => {
     const { app, deliver } = createAppShim();
     let calls = 0;

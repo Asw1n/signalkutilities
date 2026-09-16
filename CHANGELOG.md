@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `MessageHandler` now marks its state stale after `stalePeriod` even when no `onStale` callback is registered, so raw handlers wrapped by smoothers expose accurate lifecycle state.
+
 ---
 
 ## [3.1.4] — 2026-09-16
