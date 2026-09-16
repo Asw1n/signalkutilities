@@ -102,7 +102,21 @@ class MessageSmoother {
     this.smoother = null;
 
     const handlerValue = this.handler.value;
-    if (typeof handlerValue === 'number') {
+    // Prefer the full property set from the SignalK spec over the first delta, which may be
+    // partial (e.g. {roll} before {roll, pitch}) and would otherwise permanently miss keys.
+    const specProperties = this.handler.meta?.properties;
+    const specKeys = specProperties && typeof specProperties === 'object'
+      ? Object.keys(specProperties).filter(key => specProperties[key]?.type === 'number')
+      : null;
+
+    if (specKeys && specKeys.length > 0) {
+      this._isObject = true;
+      this._propertyKeys = specKeys;
+      this.smoother = {};
+      for (const key of this._propertyKeys) {
+        this.smoother[key] = new this.SmootherClass(this.smootherOptions);
+      }
+    } else if (typeof handlerValue === 'number') {
       this._isObject = false;
       this.smoother = new this.SmootherClass(this.smootherOptions);
     } else if (handlerValue && typeof handlerValue === 'object') {
@@ -229,7 +243,13 @@ class MessageSmoother {
     if (!this._isObject) {
       this.smoother.add(handlerValue, handlerVariance);
     } else if (handlerValue && typeof handlerValue === 'object') {
-      for (const key of this._propertyKeys) {
+      for (const key of Object.keys(handlerValue)) {
+        if (typeof handlerValue[key] !== 'number') continue;
+        if (!this.smoother[key]) {
+          // Key not anticipated by spec or first delta (e.g. a non-spec/custom path) - track it now.
+          this.smoother[key] = new this.SmootherClass(this.smootherOptions);
+          this._propertyKeys.push(key);
+        }
         this.smoother[key].add(handlerValue[key]);
       }
     }

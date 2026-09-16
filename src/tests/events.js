@@ -9,7 +9,7 @@ function createAppShim(options = {}) {
   return {
     app: {
       debug: () => {},
-      getMetadata: () => undefined,
+      getMetadata: options.getMetadata || (() => undefined),
       getSelfPath: options.getSelfPath || (() => undefined),
       handleMessage: () => {},
       subscriptionmanager: {
@@ -342,5 +342,47 @@ describe('boot-time bootstrap fallback (subscription race workaround)', () => {
     handler.configure('polars.activePolar');
     handler.subscribe();
     assert.equal(handler.ready, false);
+  });
+});
+
+describe('smoother object properties grow with partial deltas', () => {
+  const attitudeMeta = {
+    properties: {
+      roll: { type: 'number', units: 'rad' },
+      pitch: { type: 'number', units: 'rad' },
+      yaw: { type: 'number', units: 'rad' }
+    }
+  };
+
+  it('tracks a spec property that only appears in a later delta', () => {
+    const { app, deliver } = createAppShim({ getMetadata: () => attitudeMeta });
+    const smoother = createSmoothedHandler({
+      app,
+      pluginId: 'plugin',
+      id: 'attitude',
+      path: 'navigation.attitude',
+      subscribe: true
+    });
+    deliver([{ path: 'navigation.attitude', value: { roll: 0.1 } }]);
+    deliver([{ path: 'navigation.attitude', value: { roll: 0.2, pitch: 0.3 } }]);
+    // pitch's smoother receives its first-ever sample here, so its estimate is exact
+    // regardless of the exponential smoother's time-based weighting of roll.
+    assert.equal(smoother.value.pitch, 0.3);
+    assert.equal(typeof smoother.value.roll, 'number');
+  });
+
+  it('tracks a non-spec object property that only appears in a later delta', () => {
+    const { app, deliver } = createAppShim();
+    const smoother = createSmoothedHandler({
+      app,
+      pluginId: 'plugin',
+      id: 'custom',
+      path: 'custom.values',
+      subscribe: true
+    });
+    deliver([{ path: 'custom.values', value: { a: 1 } }]);
+    deliver([{ path: 'custom.values', value: { a: 2, b: 5 } }]);
+    assert.equal(smoother.value.b, 5);
+    assert.equal(typeof smoother.value.a, 'number');
   });
 });

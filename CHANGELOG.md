@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.1.4] — 2026-09-16
+
+### Fixed
+- `MessageSmoother` no longer permanently fixes an object path's tracked properties to whatever keys happened to be present in the first delta. It now seeds the full property set from the SignalK spec metadata (`meta.properties`, e.g. `navigation.attitude`'s `roll`/`pitch`/`yaw`) when available, and otherwise keeps discovering new numeric keys as they appear in later deltas. Previously, a path whose first delta was partial (e.g. `{roll}` before `{roll, pitch}`) would never track `pitch` at all.
+
+---
+
 ## [3.1.3] — 2026-09-08
 
 ### Fixed
