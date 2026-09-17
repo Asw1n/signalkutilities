@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.5] — 2026-09-17
+
 ### Fixed
 - `MessageHandler` now marks its state stale after `stalePeriod` even when no `onStale` callback is registered, so raw handlers wrapped by smoothers expose accurate lifecycle state.
+- Smoothers now retain a value that Signal K replays synchronously while a subscription is being started, preventing the first measurement from being lost.
 
 ---
 

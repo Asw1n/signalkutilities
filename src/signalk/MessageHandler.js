@@ -38,7 +38,9 @@ class MessageSmoother {
     this._onDelta = eventOptions.onDelta ?? null;
     this._onIdle = eventOptions.onIdle ?? null;
     this._onStale = eventOptions.onStale ?? null;
-    this._handleSourceDelta = () => { this.sample(); };
+    this._handleSourceDelta = () => {
+      if (this._lifecycle === ACTIVE) this.sample();
+    };
     this.handler.addDeltaListener(this._handleSourceDelta);
     if (this.handler.subscribed) {
       this._activateLifecycle();
@@ -142,6 +144,7 @@ class MessageSmoother {
     this.handler.subscribe();
     if (this.handler.subscribed) {
       this._activateLifecycle();
+      if (this.handler.ready) this.sample();
     } else {
       this._deactivateLifecycle();
     }

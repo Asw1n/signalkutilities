@@ -314,6 +314,31 @@ describe('event lifecycle contract', () => {
 });
 
 describe('boot-time bootstrap fallback (subscription race workaround)', () => {
+  it('samples a value replayed synchronously during smoother subscription', () => {
+    const { app } = createAppShim();
+    let callbackCalls = 0;
+    const originalSubscribe = app.subscriptionmanager.subscribe;
+    app.subscriptionmanager.subscribe = (msg, unsubscribes, errorCb, deltaCb) => {
+      originalSubscribe(msg, unsubscribes, errorCb, deltaCb);
+      deltaCb({ updates: [{ values: [{ path: 'navigation.speedThroughWater', value: 3.2 }] }] });
+    };
+
+    const smoother = createSmoothedHandler({
+      app,
+      pluginId: 'plugin',
+      id: 'speed',
+      path: 'navigation.speedThroughWater',
+      subscribe: false,
+      onDelta: () => { callbackCalls += 1; }
+    });
+
+    smoother.subscribe();
+
+    assert.equal(callbackCalls, 1);
+    assert.equal(smoother.ready, true);
+    assert.equal(smoother.value, 3.2);
+  });
+
   it('seeds the value from getSelfPath when no delta arrives at subscribe time', () => {
     const { app } = createAppShim({ getSelfPath: () => ({ href: '/resources/polars/abc' }) });
     let calls = 0;
