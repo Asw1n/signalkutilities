@@ -574,7 +574,7 @@ class MessageHandler {
   static send(app, pluginId, messages) {
     const values = [];
     messages.forEach(delta => {
-      if (delta.ready) {
+      if (delta.ready && delta._path) {
         values.push({
           path: delta._path,
           value: delta.value

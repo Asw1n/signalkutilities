@@ -18,8 +18,10 @@ class Polar {
   static send(app, pluginId, polars) {
     const values = [];
     polars.forEach(polar => {
-      if (polar.ready) {
+      if (polar.ready && polar.pathMagnitude) {
         values.push({ path: polar.pathMagnitude, value: polar.magnitude });
+      }
+      if (polar.ready && polar.pathAngle) {
         values.push({ path: polar.pathAngle, value: polar.angle });
       }
     });
@@ -794,15 +796,17 @@ class PolarSmoother {
   static send(app, pluginId, polarsSmoothed) {
     let values = [];
     polarsSmoothed.forEach(ps => {
-      if(ps.ready) {
-      values.push({
-        path: ps.polar.pathMagnitude,
-        value: ps.magnitude 
-      });
-      values.push({
-        path: ps.polar.pathAngle,
-        value: ps.angle 
-      });
+      if (ps.ready && ps.polar.pathMagnitude) {
+        values.push({
+          path: ps.polar.pathMagnitude,
+          value: ps.magnitude
+        });
+      }
+      if (ps.ready && ps.polar.pathAngle) {
+        values.push({
+          path: ps.polar.pathAngle,
+          value: ps.angle
+        });
     }
     });
     const message = {

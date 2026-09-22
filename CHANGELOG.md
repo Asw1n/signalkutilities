@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.6] — 2026-09-22
+
+### Fixed
+- Batch send helpers now skip ready handlers and polars without configured Signal K paths, preventing invalid empty-path deltas from being published.
+
+---
+
 ## [3.1.5] — 2026-09-17
 
 ### Fixed
